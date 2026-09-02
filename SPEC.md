@@ -33,6 +33,37 @@ wire protocol, full SDK, account model, or unrelated product surface.
 7. **Keep repositories independent.** This is a sibling Git repository under the
    project umbrella, with its own uv environment and history.
 
+## Broker-owned image cache
+
+Prebuilt Terminal-Bench, Harbor, and TMax images are pulled by the broker when
+they are not already present in the host Docker daemon. The broker records an
+image as owned only when it performed that pull. Images that existed before the
+request are borrowed and are never candidates for broker cleanup. Images built
+through the broker API are also recorded as owned.
+
+The inventory contains the image reference, immutable image ID, origin, and
+last-used time. It is stored as an atomically replaced JSON document on a
+node-local filesystem; it must not be placed on the project NFS filesystem.
+Docker remains the source of truth for active containers and image identity.
+
+Image garbage collection runs inside normal broker operations rather than as a
+separate service:
+
+- Before a pull or build when free space is below the configured minimum.
+- After deleting a sandbox when free space is below the configured minimum.
+- Once as an emergency cleanup before retrying a pull or build that failed with
+  `no space left on device`.
+
+Collection removes unused owned images in least-recently-used order until the
+configured target free space is reached. It never force-removes an image. Before
+deletion, the broker confirms that the recorded reference still resolves to the
+recorded image ID and that no Docker container uses that ID. Missing images and
+references that now resolve to a different image are forgotten rather than
+deleted. A short configurable minimum age protects an image between a build API
+response and the subsequent sandbox request, and an in-memory reservation closes
+the gap between resolving an image and creating its container. Shared layers
+remain protected by Docker's normal reference counting.
+
 ## Provider-level capability contract
 
 The broker and its Python client provide only the functions observed to be needed
@@ -105,6 +136,8 @@ enabled merely because a client supplied a privileged Docker option.
 - Label every owned container with broker ID and sandbox ULID.
 - Before deletion, re-read and validate all ownership labels on the exact container.
 - Never invoke Docker system prune, broad image cleanup, or unscoped container cleanup.
+  Image collection targets only exact references recorded when the broker pulled
+  or built them.
 - Use run IDs and, in a later milestone, leases for scoped crash recovery.
 - Treat command retries carefully: do not repeat a command unless it is known not to
   have started.

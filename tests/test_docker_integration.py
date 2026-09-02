@@ -1,8 +1,12 @@
+import contextlib
 import io
 import tarfile
 import time
 
+import docker
 import pytest
+from docker.errors import ImageNotFound
+from ulid import ULID
 
 from docker_sandbox_broker.config import BrokerSettings
 from docker_sandbox_broker.models import (
@@ -18,19 +22,37 @@ pytestmark = pytest.mark.docker
 
 
 @pytest.fixture
-def direct_service():
+def direct_service(tmp_path):
     settings = BrokerSettings(auth_token="integration-token-long-enough", broker_id="integration")
-    return BrokerService(settings, DockerRuntime(settings.broker_id))
+    return BrokerService(
+        settings,
+        DockerRuntime(
+            settings.broker_id,
+            state_path=tmp_path / "images.json",
+            image_gc_min_free_bytes=0,
+            image_gc_target_free_bytes=0,
+            image_gc_min_age_seconds=0,
+        ),
+    )
 
 
 @pytest.fixture
-def dind_service():
+def dind_service(tmp_path):
     settings = BrokerSettings(
         auth_token="integration-token-long-enough",
         broker_id="integration",
         allow_docker_enabled=True,
     )
-    return BrokerService(settings, DockerRuntime(settings.broker_id))
+    return BrokerService(
+        settings,
+        DockerRuntime(
+            settings.broker_id,
+            state_path=tmp_path / "images.json",
+            image_gc_min_free_bytes=0,
+            image_gc_target_free_bytes=0,
+            image_gc_min_age_seconds=0,
+        ),
+    )
 
 
 def describe_direct_sandbox_contract():
@@ -54,6 +76,70 @@ def describe_direct_sandbox_contract():
             direct_service._runtime._client.images.remove(image, force=True)
 
         assert result.stdout == "built-ok"
+
+    def it_reclaims_an_unused_broker_built_image_under_disk_pressure(tmp_path):
+        """Deletes an exact broker-built image after its final sandbox is removed."""
+        broker_id = f"pytest-gc-{str(ULID()).lower()}"
+        settings = BrokerSettings(auth_token="integration-token-long-enough", broker_id=broker_id)
+        runtime = DockerRuntime(
+            broker_id,
+            state_path=tmp_path / "images.json",
+            image_gc_min_free_bytes=10**18,
+            image_gc_target_free_bytes=10**18,
+            image_gc_min_age_seconds=0,
+        )
+        service = BrokerService(settings, runtime)
+        context = io.BytesIO()
+        with tarfile.open(fileobj=context, mode="w") as archive:
+            content = b"FROM alpine:3.20\n"
+            member = tarfile.TarInfo("Dockerfile")
+            member.size = len(content)
+            archive.addfile(member, io.BytesIO(content))
+
+        image = service.build_image("Dockerfile", context.getvalue())
+        sandbox = service.create(CreateSandboxRequest(image=image))
+        service.delete(sandbox.id)
+
+        with pytest.raises(ImageNotFound):
+            runtime._client.images.get(image)
+
+    def it_reclaims_an_unused_image_that_the_broker_pulled(tmp_path):
+        """Deletes a missing prebuilt image that was pulled specifically for a sandbox."""
+        reference = "alpine:3.19.1"
+        probe = docker.from_env()
+        try:
+            probe.images.get(reference)
+        except ImageNotFound:
+            pass
+        else:
+            pytest.skip(f"{reference} already existed before the broker request")
+        finally:
+            probe.close()
+
+        broker_id = f"pytest-pull-gc-{str(ULID()).lower()}"
+        settings = BrokerSettings(auth_token="integration-token-long-enough", broker_id=broker_id)
+        runtime = DockerRuntime(
+            broker_id,
+            state_path=tmp_path / "images.json",
+            image_gc_min_free_bytes=10**18,
+            image_gc_target_free_bytes=10**18,
+            image_gc_min_age_seconds=0,
+        )
+        service = BrokerService(settings, runtime)
+        sandbox = None
+        try:
+            sandbox = service.create(CreateSandboxRequest(image=reference))
+            service.delete(sandbox.id)
+            sandbox = None
+
+            with pytest.raises(ImageNotFound):
+                runtime._client.images.get(reference)
+        finally:
+            if sandbox is not None:
+                service.delete(sandbox.id)
+            with contextlib.suppress(ImageNotFound):
+                runtime._client.images.remove(reference)
+            runtime._client.close()
 
     def it_executes_and_transfers_files_without_leaking_a_container(direct_service):
         """Executes and transfers files, then leaves no direct task container."""

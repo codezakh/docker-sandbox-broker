@@ -3,7 +3,11 @@
 import os
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+
+def default_state_dir() -> Path:
+    return Path("/var/tmp") / f"docker-sandbox-broker-{os.getuid()}"
 
 
 class BrokerSettings(BaseModel):
@@ -15,6 +19,16 @@ class BrokerSettings(BaseModel):
     max_upload_bytes: int = Field(default=128 * 1024 * 1024, ge=1024)
     max_download_bytes: int = Field(default=128 * 1024 * 1024, ge=1024)
     max_output_bytes: int = Field(default=1_000_000, ge=1024)
+    state_dir: Path = Field(default_factory=default_state_dir)
+    image_gc_min_free_mb: int = Field(default=20 * 1024, ge=0)
+    image_gc_target_free_mb: int = Field(default=40 * 1024, ge=0)
+    image_gc_min_age_seconds: int = Field(default=300, ge=0)
+
+    @model_validator(mode="after")
+    def image_gc_target_exceeds_minimum(self) -> "BrokerSettings":
+        if self.image_gc_target_free_mb < self.image_gc_min_free_mb:
+            raise ValueError("image GC target free space must be at least its minimum")
+        return self
 
     @classmethod
     def from_environment(cls) -> "BrokerSettings":
@@ -27,6 +41,12 @@ class BrokerSettings(BaseModel):
             allow_docker_enabled=_env_bool("DSB_ALLOW_DOCKER_ENABLED", False),
             max_memory_mb=int(os.environ.get("DSB_MAX_MEMORY_MB", "16384")),
             max_cpus=float(os.environ.get("DSB_MAX_CPUS", "8")),
+            state_dir=Path(os.environ.get("DSB_STATE_DIR", default_state_dir())),
+            image_gc_min_free_mb=int(os.environ.get("DSB_IMAGE_GC_MIN_FREE_MB", str(20 * 1024))),
+            image_gc_target_free_mb=int(
+                os.environ.get("DSB_IMAGE_GC_TARGET_FREE_MB", str(40 * 1024))
+            ),
+            image_gc_min_age_seconds=int(os.environ.get("DSB_IMAGE_GC_MIN_AGE_SECONDS", "300")),
         )
 
 

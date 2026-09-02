@@ -96,6 +96,14 @@ elsewhere.
 Docker-enabled sandboxes use privileged Docker-in-Docker with host networking.
 They are disabled unless `DSB_ALLOW_DOCKER_ENABLED=true` is set.
 
+The broker records images it pulls or builds in node-local state under
+`/var/tmp/docker-sandbox-broker-$UID` and reclaims unused owned images when the
+Docker filesystem runs low on space. Configure this with `DSB_STATE_DIR`,
+`DSB_IMAGE_GC_MIN_FREE_MB` (default 20480), `DSB_IMAGE_GC_TARGET_FREE_MB`
+(default 40960), and `DSB_IMAGE_GC_MIN_AGE_SECONDS` (default 300). Set both
+free-space values to `0` to disable collection. Do not place `DSB_STATE_DIR` on
+NFS.
+
 The host-network Compose compatibility overlay maps service names to localhost.
 This works around the current host's Docker bridge DNS failure, but means Compose
 jobs must run serially when their services bind the same ports.
@@ -105,6 +113,9 @@ jobs must run serially when their services bind the same ports.
 OpenInstruct selects `backend_type="local_broker"`. Harbor selects the custom
 environment class `docker_sandbox_broker.harbor:LocalBrokerEnvironment`.
 Both read `DSB_AUTH_TOKEN` and either `DSB_SOCKET` or `DSB_URL`.
+
+See [Consumer integrations](INTEGRATIONS.md) for the Harbor configuration and
+the small backend registration OpenInstruct requires.
 
 The Harbor adapter supports direct Dockerfile, prebuilt-image, and Docker Compose
 tasks. Compose reuses Harbor's DinD orchestration inside an approved privileged

@@ -26,6 +26,10 @@ def live_broker(tmp_path):
         "DSB_AUTH_TOKEN": token,
         "DSB_BROKER_ID": broker_id,
         "DSB_ALLOW_DOCKER_ENABLED": "true",
+        "DSB_STATE_DIR": str(tmp_path / "broker-state"),
+        "DSB_IMAGE_GC_MIN_FREE_MB": "0",
+        "DSB_IMAGE_GC_TARGET_FREE_MB": "0",
+        "DSB_IMAGE_GC_MIN_AGE_SECONDS": "0",
     }
     with log_path.open("w+") as log_file:
         process = subprocess.Popen(
@@ -59,6 +63,10 @@ def host_broker_runtime(tmp_path):
     environment = {
         **os.environ,
         "DSB_BROKER_ID": broker_id,
+        "DSB_STATE_DIR": str(tmp_path / "broker-state"),
+        "DSB_IMAGE_GC_MIN_FREE_MB": "0",
+        "DSB_IMAGE_GC_TARGET_FREE_MB": "0",
+        "DSB_IMAGE_GC_MIN_AGE_SECONDS": "0",
     }
     with log_path.open("w+") as log_file:
         process = subprocess.Popen(

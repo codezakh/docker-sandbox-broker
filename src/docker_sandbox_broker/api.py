@@ -26,7 +26,13 @@ def create_app(
     runtime: SandboxRuntime | None = None,
 ) -> FastAPI:
     active_settings = settings or BrokerSettings.from_environment()
-    active_runtime = runtime or DockerRuntime(active_settings.broker_id)
+    active_runtime = runtime or DockerRuntime(
+        active_settings.broker_id,
+        state_path=active_settings.state_dir / active_settings.broker_id / "images.json",
+        image_gc_min_free_bytes=active_settings.image_gc_min_free_mb * 1024 * 1024,
+        image_gc_target_free_bytes=active_settings.image_gc_target_free_mb * 1024 * 1024,
+        image_gc_min_age_seconds=active_settings.image_gc_min_age_seconds,
+    )
     service = BrokerService(active_settings, active_runtime)
     authorize = _authorizer(active_settings.auth_token)
 

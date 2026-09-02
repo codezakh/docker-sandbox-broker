@@ -2,10 +2,11 @@
 
 import contextlib
 import io
+import os
 import shlex
 import tarfile
 from dataclasses import dataclass
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Protocol
 from uuid import uuid4
 
@@ -17,6 +18,7 @@ from docker_sandbox_broker.errors import (
     RuntimeOperationError,
     SandboxOwnershipError,
 )
+from docker_sandbox_broker.image_cache import ImageCache
 from docker_sandbox_broker.models import CreateSandboxRequest, ExecRequest, ExecResult
 
 MANAGED_BY_LABEL = "me.zaidkhan.docker-sandbox-broker.managed"
@@ -54,28 +56,66 @@ class SandboxRuntime(Protocol):
 class DockerRuntime:
     """Own only containers carrying this broker's exact ownership labels."""
 
-    def __init__(self, broker_id: str, client=None):
+    def __init__(
+        self,
+        broker_id: str,
+        client=None,
+        *,
+        state_path: Path | None = None,
+        image_gc_min_free_bytes: int = 20 * 1024**3,
+        image_gc_target_free_bytes: int = 40 * 1024**3,
+        image_gc_min_age_seconds: int = 300,
+        image_cache: ImageCache | None = None,
+    ):
         self._broker_id = broker_id
         self._client = client or docker.from_env(timeout=300)
+        active_state_path = state_path or (
+            Path("/var/tmp") / f"docker-sandbox-broker-{os.getuid()}" / broker_id / "images.json"
+        )
+        self._image_cache = image_cache or ImageCache(
+            self._client,
+            active_state_path,
+            image_gc_min_free_bytes,
+            image_gc_target_free_bytes,
+            image_gc_min_age_seconds,
+        )
 
     def build_image(self, build_id: str, dockerfile: str, context: bytes) -> str:
         _validate_tar(context)
         tag = f"docker-sandbox-broker/{self._broker_id}:{build_id.lower()}"
+        self._image_cache.collect_if_needed()
         try:
-            self._client.images.build(
-                fileobj=io.BytesIO(context),
-                custom_context=True,
-                dockerfile=dockerfile,
-                tag=tag,
-                rm=True,
-                forcerm=True,
-            )
+            image = self._build_image(tag, dockerfile, context)
         except DockerException as error:
-            raise RuntimeOperationError(f"could not build sandbox image: {error}") from error
+            if not _out_of_space(error):
+                raise RuntimeOperationError(f"could not build sandbox image: {error}") from error
+            self._image_cache.collect_if_needed(emergency=True)
+            try:
+                image = self._build_image(tag, dockerfile, context)
+            except DockerException as retry_error:
+                raise RuntimeOperationError(
+                    f"could not build sandbox image: {retry_error}"
+                ) from retry_error
+        self._image_cache.record(tag, image.id, "built")
         return tag
 
+    def _build_image(self, tag: str, dockerfile: str, context: bytes):
+        image, _logs = self._client.images.build(
+            fileobj=io.BytesIO(context),
+            custom_context=True,
+            dockerfile=dockerfile,
+            tag=tag,
+            labels={
+                MANAGED_BY_LABEL: "true",
+                BROKER_ID_LABEL: self._broker_id,
+            },
+            rm=True,
+            forcerm=True,
+        )
+        return image
+
     def create(self, sandbox_id: str, request: CreateSandboxRequest) -> RuntimeSandbox:
-        self._ensure_image(request.image)
+        image_id = self._ensure_image(request.image)
         labels = {
             MANAGED_BY_LABEL: "true",
             BROKER_ID_LABEL: self._broker_id,
@@ -87,14 +127,15 @@ class DockerRuntime:
             labels[DOCKER_ENABLED_LABEL] = "true"
         kwargs = self._container_options(request, labels)
         container = None
-        try:
-            container = self._client.containers.create(request.image, **kwargs)
-            container.start()
-            container.reload()
-        except DockerException as error:
-            if container is not None:
-                container.remove(force=True)
-            raise RuntimeOperationError(f"could not create sandbox: {error}") from error
+        with self._image_cache.reserve(image_id):
+            try:
+                container = self._client.containers.create(request.image, **kwargs)
+                container.start()
+                container.reload()
+            except DockerException as error:
+                if container is not None:
+                    container.remove(force=True)
+                raise RuntimeOperationError(f"could not create sandbox: {error}") from error
         return RuntimeSandbox(id=container.id, state=_state(container))
 
     def inspect(self, runtime_id: str) -> RuntimeSandbox:
@@ -227,15 +268,29 @@ class DockerRuntime:
             return
         except DockerException as error:
             raise RuntimeOperationError(f"could not delete sandbox: {error}") from error
+        self._image_cache.collect_if_needed()
 
-    def _ensure_image(self, image: str) -> None:
+    def _ensure_image(self, image: str) -> str:
         try:
-            self._client.images.get(image)
+            existing = self._client.images.get(image)
         except ImageNotFound:
+            self._image_cache.collect_if_needed()
             try:
-                self._client.images.pull(image)
+                pulled = self._client.images.pull(image)
             except DockerException as error:
-                raise RuntimeOperationError(f"could not pull image {image}: {error}") from error
+                if not _out_of_space(error):
+                    raise RuntimeOperationError(f"could not pull image {image}: {error}") from error
+                self._image_cache.collect_if_needed(emergency=True)
+                try:
+                    pulled = self._client.images.pull(image)
+                except DockerException as retry_error:
+                    raise RuntimeOperationError(
+                        f"could not pull image {image}: {retry_error}"
+                    ) from retry_error
+            self._image_cache.record(image, pulled.id, "pulled")
+            return pulled.id
+        self._image_cache.touch(image, existing.id)
+        return existing.id
 
     def _container(self, runtime_id: str):
         try:
@@ -269,6 +324,10 @@ class DockerRuntime:
 
 def _docker_enabled(container) -> bool:
     return (container.labels or {}).get(DOCKER_ENABLED_LABEL) == "true"
+
+
+def _out_of_space(error: DockerException) -> bool:
+    return "no space left on device" in str(error).lower()
 
 
 def _put_file(container, root: str, name: str, content: bytes) -> None:
