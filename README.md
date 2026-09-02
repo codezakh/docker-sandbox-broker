@@ -66,6 +66,24 @@ export DSB_AUTH_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(
 uv run docker-sandbox-broker --uds "/run/user/$(id -u)/docker-sandbox-broker.sock"
 ```
 
+For the Harbor development-container workflow, use the host launcher instead:
+
+```bash
+uv run docker-sandbox-broker-host --allow-docker
+```
+
+It creates a user-private runtime directory under `XDG_RUNTIME_DIR` (or a
+UID-scoped `/tmp` fallback), keeps a stable mode-`0600` token there, and exposes
+`broker.sock` plus a Docker-compatible `container.env` only while serving. A
+container should mount that runtime directory read-only and pass
+`--env-file .../container.env`; it must never mount the host Docker socket.
+
+The Harbor sandbox launcher discovers this runtime automatically. It also
+mounts a sibling `docker-sandbox-broker` checkout read-only and adds its `src`
+directory to `PYTHONPATH`, keeping the two uv projects independent. Override
+the defaults with `DSB_RUNTIME_DIR` or `DSB_SOURCE_DIR` when the checkouts live
+elsewhere.
+
 Docker-enabled sandboxes use privileged Docker-in-Docker with host networking.
 They are disabled unless `DSB_ALLOW_DOCKER_ENABLED=true` is set.
 

@@ -136,6 +136,19 @@ Return stable, typed error codes and retryability metadata.
 
 ## Consumer integrations
 
+### Development-container boundary
+
+The broker runs on the host and creates a user-private runtime directory with a
+Unix socket and Docker-compatible environment file. Development containers
+receive only a read-only mount of that directory. Docker reads the private env
+file when launching the container, keeping the bearer token out of launcher
+arguments and logs. The host Docker socket is never mounted.
+
+The Harbor sandbox may mount the sibling broker checkout read-only and place
+its `src` directory on `PYTHONPATH`. This is a source-level consumer adapter,
+not a shared uv environment: both repositories retain independent manifests,
+locks, Git histories, and build lifecycles.
+
 ### OpenInstruct
 
 Implement a thin `SandboxBackend` that maps its six methods to the local provider
@@ -173,9 +186,11 @@ service addressing, Compose behavior, artifact handling, and trial lifecycle.
 The repository-owned lightweight integration suite currently implements the live
 broker contract, a synthetic Harbor direct oracle task, a deterministic
 OpenInstruct environment rollout, and a synthetic Harbor multi-service Compose
-oracle task. These exercise the actual consumer entry points rather than mocked
-copies and require neither CUDA nor vLLM. Real TB-Lite and generated-model runs
-remain opt-in validation stages because they depend on external datasets and
+oracle task. It also starts the dedicated host launcher and runs both the broker
+client and Harbor's real CLI inside the existing development-container image.
+These exercise the actual consumer entry points rather than mocked copies and
+require neither CUDA nor vLLM. Real TB-Lite and generated-model runs remain
+opt-in validation stages because they depend on external datasets and
 substantially heavier images or model infrastructure.
 
 Real-Docker tests are opt-in and may create only explicitly named, broker-labeled

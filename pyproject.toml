@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 docker-sandbox-broker = "docker_sandbox_broker.cli:main"
+docker-sandbox-broker-host = "docker_sandbox_broker.host:main"
 
 [dependency-groups]
 dev = [
@@ -50,6 +51,7 @@ markers = [
     "harbor: requires the optional Harbor consumer environment",
     "openinstruct: requires the optional OpenInstruct consumer environment",
     "compose: exercises privileged Docker-in-Docker Compose support",
+    "devcontainer: crosses from a development container to the host broker socket",
 ]
 spec_header_format = "{module_path}:"
 spec_container_format = "{sentence}:"

@@ -11,6 +11,7 @@ from docker.errors import ImageNotFound
 from ulid import ULID
 
 from docker_sandbox_broker import BrokerClient
+from docker_sandbox_broker.host import CONTAINER_ENV_NAME, SOCKET_NAME, TOKEN_NAME, HostRuntime
 
 
 @pytest.fixture
@@ -48,6 +49,55 @@ def live_broker(tmp_path):
                 process.kill()
                 process.wait(timeout=10)
             _remove_test_images(image_repository)
+
+
+@pytest.fixture
+def host_broker_runtime(tmp_path):
+    runtime_dir = tmp_path / "host-runtime"
+    log_path = tmp_path / "host-broker.log"
+    broker_id = f"pytest-container-{str(ULID()).lower()}"
+    environment = {
+        **os.environ,
+        "DSB_BROKER_ID": broker_id,
+    }
+    with log_path.open("w+") as log_file:
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "docker_sandbox_broker.host",
+                "--runtime-dir",
+                str(runtime_dir),
+                "--allow-docker",
+            ],
+            env=environment,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        try:
+            socket_path = runtime_dir / SOCKET_NAME
+            _wait_until_ready(process, socket_path, log_file)
+            token = (runtime_dir / TOKEN_NAME).read_text().strip()
+            runtime = HostRuntime(
+                directory=runtime_dir,
+                socket=socket_path,
+                token_file=runtime_dir / TOKEN_NAME,
+                container_env=runtime_dir / CONTAINER_ENV_NAME,
+                token=token,
+            )
+            with BrokerClient(token, uds=socket_path) as client:
+                yield runtime, client
+                for sandbox in client.list():
+                    client.delete(sandbox.id)
+        finally:
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=10)
+            _remove_test_images(f"docker-sandbox-broker/{broker_id}")
 
 
 def _wait_until_ready(process, socket_path, log_file):
