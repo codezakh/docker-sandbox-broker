@@ -1,0 +1,51 @@
+[project]
+name = "docker-sandbox-broker"
+version = "0.1.0"
+description = "A small provider-shaped API for safely brokering local Docker sandboxes."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "docker>=7.1.0",
+    "fastapi>=0.116.0",
+    "httpx>=0.28.0",
+    "pydantic>=2.11.0",
+    "python-ulid>=3.1.0",
+    "structlog>=25.4.0",
+    "uvicorn>=0.35.0",
+]
+
+[project.scripts]
+docker-sandbox-broker = "docker_sandbox_broker.cli:main"
+
+[dependency-groups]
+dev = [
+    "complexipy>=4.2.0",
+    "pytest>=9.0.0",
+    "pytest-describe>=3.0.0",
+    "pytest-spec>=5.0.0",
+    "ruff>=0.14.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+addopts = "--spec --tb=short -m 'not docker'"
+testpaths = ["tests"]
+markers = [
+    "docker: requires and modifies the local Docker daemon using broker-owned resources",
+]
+spec_header_format = "{module_path}:"
+spec_container_format = "{sentence}:"
+spec_test_format = "{result} {docstring_summary}"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]
