@@ -87,7 +87,8 @@ Docker-in-Docker controller image. Harbor reuses its existing DinD orchestration
 On the current host, Docker-enabled sandboxes require host networking. Testing
 showed ordinary Docker bridge containers could not resolve external DNS, while a
 privileged DinD controller using host networking successfully provided nested HTTP
-and registry access.
+and registry access. The compatibility overlay maps Compose service names to
+`127.0.0.1`; jobs that bind the same ports therefore run serially.
 
 Docker-enabled mode is opt-in, restricted to approved images, and must never be
 enabled merely because a client supplied a privileged Docker option.
@@ -168,6 +169,14 @@ service addressing, Compose behavior, artifact handling, and trial lifecycle.
 7. **Compose canary:** run a modest multi-service Terminal-Bench oracle task.
 8. **Generated rollout:** only after the preceding tests pass, add vLLM, a model,
    Ray, GPUs, and progressively scale to the documented training smoke shape.
+
+The repository-owned lightweight integration suite currently implements the live
+broker contract, a synthetic Harbor direct oracle task, a deterministic
+OpenInstruct environment rollout, and a synthetic Harbor multi-service Compose
+oracle task. These exercise the actual consumer entry points rather than mocked
+copies and require neither CUDA nor vLLM. Real TB-Lite and generated-model runs
+remain opt-in validation stages because they depend on external datasets and
+substantially heavier images or model infrastructure.
 
 Real-Docker tests are opt-in and may create only explicitly named, broker-labeled
 resources. Test cleanup must target exact IDs and run even after assertion failures.

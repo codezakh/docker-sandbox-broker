@@ -1,0 +1,17 @@
+version = "1.0"
+
+[metadata]
+author_name = "Docker Sandbox Broker"
+author_email = "brain@zaidkhan.me"
+difficulty = "easy"
+category = "integration-testing"
+tags = ["broker", "oracle"]
+
+[verifier]
+timeout_sec = 30.0
+
+[agent]
+timeout_sec = 30.0
+
+[environment]
+build_timeout_sec = 60.0

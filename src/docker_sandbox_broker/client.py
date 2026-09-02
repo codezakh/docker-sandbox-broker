@@ -61,6 +61,9 @@ class BrokerClient:
         response = self._request("GET", "/v1/sandboxes")
         return [SandboxView.model_validate(item) for item in response.json()]
 
+    def delete(self, sandbox_id: str) -> None:
+        self._request("DELETE", f"/v1/sandboxes/{sandbox_id}")
+
     def close(self) -> None:
         self._http.close()
 
@@ -101,7 +104,7 @@ class Sandbox:
         return self.view
 
     def delete(self) -> None:
-        self._client._request("DELETE", f"/v1/sandboxes/{self.id}")
+        self._client.delete(self.id)
 
 
 class SandboxProcess:

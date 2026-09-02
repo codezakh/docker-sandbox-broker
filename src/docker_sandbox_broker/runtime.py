@@ -1,11 +1,13 @@
 """Docker runtime implementation hidden behind the broker API."""
 
+import contextlib
 import io
 import shlex
 import tarfile
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Protocol
+from uuid import uuid4
 
 import docker
 from docker.errors import DockerException, ImageNotFound, NotFound
@@ -21,6 +23,8 @@ MANAGED_BY_LABEL = "me.zaidkhan.docker-sandbox-broker.managed"
 BROKER_ID_LABEL = "me.zaidkhan.docker-sandbox-broker.broker-id"
 SANDBOX_ID_LABEL = "me.zaidkhan.docker-sandbox-broker.sandbox-id"
 RUN_ID_LABEL = "me.zaidkhan.docker-sandbox-broker.run-id"
+DOCKER_ENABLED_LABEL = "me.zaidkhan.docker-sandbox-broker.docker-enabled"
+TRANSFER_DIR = "/broker-transfer"
 
 
 @dataclass(frozen=True)
@@ -79,6 +83,8 @@ class DockerRuntime:
         }
         if request.run_id:
             labels[RUN_ID_LABEL] = request.run_id
+        if request.features.docker:
+            labels[DOCKER_ENABLED_LABEL] = "true"
         kwargs = self._container_options(request, labels)
         container = None
         try:
@@ -126,6 +132,19 @@ class DockerRuntime:
 
     def write_file(self, runtime_id: str, path: str, content: bytes) -> None:
         target = _absolute_path(path)
+        container = self._container(runtime_id)
+        if _docker_enabled(container):
+            staged = f"{TRANSFER_DIR}/{uuid4().hex}"
+            _put_file(container, TRANSFER_DIR, PurePosixPath(staged).name, content)
+            try:
+                _exec_checked(
+                    container,
+                    f"mkdir -p {shlex.quote(str(target.parent))} && "
+                    f"mv {shlex.quote(staged)} {shlex.quote(str(target))}",
+                )
+            finally:
+                _exec_cleanup(container, staged)
+            return
         archive = io.BytesIO()
         with tarfile.open(fileobj=archive, mode="w") as tar:
             info = tarfile.TarInfo(target.name)
@@ -137,6 +156,14 @@ class DockerRuntime:
     def read_file(self, runtime_id: str, path: str, limit: int) -> bytes:
         target = _absolute_path(path)
         container = self._container(runtime_id)
+        staged = None
+        if _docker_enabled(container):
+            staged = f"{TRANSFER_DIR}/{uuid4().hex}"
+            _exec_checked(
+                container,
+                f"cp {shlex.quote(str(target))} {shlex.quote(staged)}",
+            )
+            target = PurePosixPath(staged)
         try:
             chunks, _ = container.get_archive(str(target))
             archive_bytes = _read_chunks(chunks, limit)
@@ -152,11 +179,26 @@ class DockerRuntime:
             raise RuntimeOperationError(f"file does not exist: {path}") from error
         except tarfile.TarError as error:
             raise RuntimeOperationError(f"invalid archive returned for {path}") from error
+        finally:
+            if staged is not None:
+                _exec_cleanup(container, staged)
 
     def put_archive(self, runtime_id: str, root: str, content: bytes) -> None:
         target = _absolute_path(root)
         _validate_tar(content)
         container = self._container(runtime_id)
+        if _docker_enabled(container):
+            staged = f"{TRANSFER_DIR}/{uuid4().hex}.tar"
+            _put_file(container, TRANSFER_DIR, PurePosixPath(staged).name, content)
+            try:
+                _exec_checked(
+                    container,
+                    f"mkdir -p {shlex.quote(str(target))} && "
+                    f"tar -xf {shlex.quote(staged)} -C {shlex.quote(str(target))}",
+                )
+            finally:
+                _exec_cleanup(container, staged)
+            return
         try:
             accepted = container.put_archive(str(target), content)
         except DockerException as error:
@@ -216,12 +258,48 @@ class DockerRuntime:
         }
         if request.features.docker:
             options["network_mode"] = "host"
+            options["volumes"] = [TRANSFER_DIR]
         if request.resources.memory_mb is not None:
             options["mem_limit"] = f"{request.resources.memory_mb}m"
             options["memswap_limit"] = f"{request.resources.memory_mb}m"
         if request.resources.cpus is not None:
             options["nano_cpus"] = int(request.resources.cpus * 1_000_000_000)
         return options
+
+
+def _docker_enabled(container) -> bool:
+    return (container.labels or {}).get(DOCKER_ENABLED_LABEL) == "true"
+
+
+def _put_file(container, root: str, name: str, content: bytes) -> None:
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode="w") as tar:
+        info = tarfile.TarInfo(name)
+        info.size = len(content)
+        info.mode = 0o600
+        tar.addfile(info, io.BytesIO(content))
+    try:
+        accepted = container.put_archive(root, archive.getvalue())
+    except DockerException as error:
+        raise RuntimeOperationError(f"transfer staging failed: {error}") from error
+    if not accepted:
+        raise RuntimeOperationError("Docker rejected transfer staging")
+
+
+def _exec_checked(container, command: str) -> None:
+    try:
+        result = container.exec_run(["sh", "-lc", command], demux=True, user="root")
+    except DockerException as error:
+        raise RuntimeOperationError(f"transfer command failed: {error}") from error
+    if result.exit_code != 0:
+        stdout, stderr = result.output or (b"", b"")
+        detail = (stderr or stdout or b"unknown error").decode(errors="replace")
+        raise RuntimeOperationError(f"transfer command failed: {detail}")
+
+
+def _exec_cleanup(container, path: str) -> None:
+    with contextlib.suppress(DockerException):
+        container.exec_run(["sh", "-lc", f"rm -f {shlex.quote(path)}"], user="root")
 
 
 def _state(container) -> str:

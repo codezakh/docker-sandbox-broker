@@ -80,6 +80,11 @@ def describe_docker_enabled_contract():
         sandbox = dind_service.create(request)
         try:
             _wait_for_inner_docker(dind_service, sandbox.id)
+            dind_service.write_file(sandbox.id, "/tmp/outer-file.txt", b"outer-file-ok")
+            outer_file = dind_service.exec(
+                sandbox.id,
+                ExecRequest(command="cat /tmp/outer-file.txt", timeout_seconds=30),
+            )
             result = dind_service.exec(
                 sandbox.id,
                 ExecRequest(
@@ -96,6 +101,11 @@ def describe_docker_enabled_contract():
 
         assert result.stdout.strip() == "nested-ok"
         assert result.exit_code == 0
+        assert (
+            outer_file.stdout,
+            outer_file.stderr,
+            outer_file.exit_code,
+        ) == ("outer-file-ok", "", 0)
         assert "Docker Compose version" in compose.stdout
 
 

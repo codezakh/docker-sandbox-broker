@@ -118,7 +118,9 @@ def describe_harbor_local_broker_environment():
 
         assert result.return_code == 0
         assert target.read_bytes() == b"result"
-        command, kwargs = FakeClient.latest.sandbox.process.calls[-1]
+        command, kwargs = next(
+            call for call in FakeClient.latest.sandbox.process.calls if call[0] == "printf hello"
+        )
         assert command == "printf hello"
         assert kwargs["cwd"] == "/workspace"
         assert kwargs["timeout"] == 17

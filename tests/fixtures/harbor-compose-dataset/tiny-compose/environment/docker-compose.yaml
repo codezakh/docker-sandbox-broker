@@ -1,0 +1,16 @@
+services:
+  main:
+    depends_on:
+      sidecar:
+        condition: service_healthy
+  sidecar:
+    image: busybox:1.36
+    command:
+      - sh
+      - -c
+      - mkdir -p /www && printf compose-sidecar-ok > /www/status && httpd -f -p 8080 -h /www
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/status"]
+      interval: 1s
+      timeout: 1s
+      retries: 20
