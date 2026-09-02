@@ -378,7 +378,11 @@ class LocalBrokerEnvironment(ComposeServiceOpsMixin, BaseEnvironment):
             dockerfile = self.environment_dir / "Dockerfile"
             self._dockerfile_workdir = parse_dockerfile_workdir(dockerfile)
             context = pack_dir_to_bytes(self.environment_dir, compress=False).getvalue()
-            image = await asyncio.to_thread(self._client.build_image, context)
+            image = await asyncio.to_thread(
+                self._client.build_image,
+                context,
+                timeout=self.task_env_config.build_timeout_sec + 30,
+            )
         request = CreateSandboxRequest(
             image=image,
             environment=self._startup_env(),

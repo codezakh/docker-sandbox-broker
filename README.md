@@ -41,6 +41,10 @@ uv run --group integration-openinstruct pytest -m 'openinstruct and e2e' \
 # 4. Harbor's real Compose orchestration through broker-provided DinD.
 uv run --group integration-harbor pytest -m 'compose and e2e' \
   tests/e2e/test_harbor_compose.py
+
+# Opt-in real OpenThoughts-TBLite task from the development-container image.
+DSB_RUN_TERMINALBENCH=true uv run pytest -m terminalbench \
+  tests/e2e/test_terminalbench_container.py
 ```
 
 The OpenInstruct test uses the sibling `world-model-tmax/training/open-instruct`
@@ -48,6 +52,11 @@ checkout by default. Set `DSB_OPENINSTRUCT_ROOT` to test another checkout. The
 optional dependency group deliberately contains only the environment/rollout
 imports needed by this deterministic test; it does not install the fork's
 training stack.
+
+The real canary currently uses `bash-log-processor-fix`. Its shipped oracle has
+a filename-grouping bug and reliably earns partial reward rather than `1.0`;
+the test records that known baseline while still requiring a clean Harbor run,
+real verifier output, and complete broker cleanup.
 
 The default output is an executable behavior specification rendered by
 pytest-describe and pytest-spec. The optional Harbor adapter contract can be run

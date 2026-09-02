@@ -52,11 +52,13 @@ class FakeClient:
         self.sandbox = FakeSandbox()
         self.request = None
         self.context = None
+        self.build_timeout = None
         self.closed = False
         FakeClient.latest = self
 
-    def build_image(self, context):
+    def build_image(self, context, *, timeout=None):
         self.context = context
+        self.build_timeout = timeout
         return "broker-built:test"
 
     def create(self, request):
@@ -85,7 +87,11 @@ def describe_harbor_local_broker_environment():
             environment_name="tiny-task",
             session_id="tiny-task__test__env",
             trial_paths=TrialPaths(tmp_path / "trial"),
-            task_env_config=EnvironmentConfig(cpus=1, memory_mb=128),
+            task_env_config=EnvironmentConfig(
+                cpus=1,
+                memory_mb=128,
+                build_timeout_sec=123,
+            ),
         )
 
     @pytest.mark.anyio
@@ -97,6 +103,7 @@ def describe_harbor_local_broker_environment():
         await environment.stop(delete=True)
 
         assert FakeClient.latest.context
+        assert FakeClient.latest.build_timeout == 153
         assert FakeClient.latest.request.image == "broker-built:test"
         assert FakeClient.latest.request.resources.cpus == 1
         assert FakeClient.latest.request.resources.memory_mb == 128

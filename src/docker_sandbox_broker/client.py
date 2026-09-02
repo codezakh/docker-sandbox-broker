@@ -43,14 +43,21 @@ class BrokerClient:
         response = self._request("POST", "/v1/sandboxes", json=request.model_dump())
         return Sandbox(self, SandboxView.model_validate(response.json()))
 
-    def build_image(self, context: bytes, dockerfile: str = "Dockerfile") -> str:
-        response = self._request(
-            "POST",
-            "/v1/images/build",
-            params={"dockerfile": dockerfile},
-            content=context,
-            headers={"Content-Type": "application/x-tar"},
-        )
+    def build_image(
+        self,
+        context: bytes,
+        dockerfile: str = "Dockerfile",
+        *,
+        timeout: float | None = None,
+    ) -> str:
+        request_options: dict[str, Any] = {
+            "params": {"dockerfile": dockerfile},
+            "content": context,
+            "headers": {"Content-Type": "application/x-tar"},
+        }
+        if timeout is not None:
+            request_options["timeout"] = timeout
+        response = self._request("POST", "/v1/images/build", **request_options)
         return str(response.json()["image"])
 
     def get(self, sandbox_id: str) -> SandboxView:

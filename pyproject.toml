@@ -52,6 +52,7 @@ markers = [
     "openinstruct: requires the optional OpenInstruct consumer environment",
     "compose: exercises privileged Docker-in-Docker Compose support",
     "devcontainer: crosses from a development container to the host broker socket",
+    "terminalbench: runs an opt-in real Terminal-Bench task and verifier",
 ]
 spec_header_format = "{module_path}:"
 spec_container_format = "{sentence}:"
