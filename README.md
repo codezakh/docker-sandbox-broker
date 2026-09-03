@@ -93,6 +93,56 @@ directory to `PYTHONPATH`, keeping the two uv projects independent. Override
 the defaults with `DSB_RUNTIME_DIR` or `DSB_SOURCE_DIR` when the checkouts live
 elsewhere.
 
+### Broker and development sandbox on different hosts
+
+Use the HTTP transport when the broker runs on one machine and the consumer's
+development sandbox runs on another machine on the same trusted network. For
+example, to run Docker task containers on `bansal8` while running the
+`world-model-tmax` development sandbox on `bansal13`, start the broker on
+`bansal8`:
+
+```bash
+cd /path/to/docker-sandbox-broker
+export DSB_AUTH_TOKEN='shared-university-broker-token'
+export DSB_ALLOW_DOCKER_ENABLED=true  # required for Harbor Compose tasks
+uv run docker-sandbox-broker --host 0.0.0.0 --port 8765
+```
+
+The API always requires a token of at least 16 characters. On a trusted lab
+network this can be a fixed shared value rather than a separately managed
+secret. The HTTP server does not provide TLS, so restrict the listening port to
+the trusted network or place it behind SSH, a VPN, or a TLS reverse proxy when
+crossing an untrusted network.
+
+On `bansal13`, launch the `world-model-tmax` development sandbox as usual. The
+launcher automatically configures only a broker running locally over a Unix
+socket, so configure the remote endpoint inside the development sandbox:
+
+```bash
+unset DSB_SOCKET
+export DSB_URL=http://bansal8:8765
+export DSB_AUTH_TOKEN='shared-university-broker-token'
+
+curl -H "Authorization: Bearer $DSB_AUTH_TOKEN" "$DSB_URL/health"
+```
+
+Then select the broker-backed consumer, for example:
+
+```bash
+# OpenInstruct training
+SANDBOX_BACKEND=local_broker bash scripts/local/train_wm_stage2_rl.sh
+
+# Harbor evaluation
+HARBOR_ENV=docker_sandbox_broker.harbor:LocalBrokerEnvironment \
+    bash scripts/local/run_stage2_evals.sh
+```
+
+Keep a sibling broker checkout on `bansal13`: the development sandbox mounts
+its Python client and adapter source even though the broker service runs on
+`bansal8`. All task images, containers, Docker cache, and broker state live on
+`bansal8`; `bansal13` is only the client. Keep the broker process running for
+the duration of the jobs that use it.
+
 Docker-enabled sandboxes use privileged Docker-in-Docker with host networking.
 They are disabled unless `DSB_ALLOW_DOCKER_ENABLED=true` is set.
 
