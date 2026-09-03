@@ -23,10 +23,18 @@ class BrokerSettings(BaseModel):
     image_gc_min_free_mb: int = Field(default=20 * 1024, ge=0)
     image_gc_target_free_mb: int = Field(default=40 * 1024, ge=0)
     image_gc_min_age_seconds: int = Field(default=300, ge=0)
-    sandbox_ttl_seconds: int = Field(default=1800, ge=0)
+    sandbox_ttl_seconds: int = Field(default=14400, ge=0)
     """Default lifetime for a sandbox whose request does not set one. 0 disables
     expiry entirely, which returns the broker to relying on clients to delete
-    what they create."""
+    what they create.
+
+    Four hours. The deadline has to exceed the longest single task a sandbox
+    will serve, because it is absolute and is not extended by activity. An
+    OpenInstruct rollout is bounded by its step limit times its per-command
+    timeout, which is over two hours at the defaults this project uses, and a
+    measured rollout has already reached 30 minutes. A deadline that only
+    reclaims after a crash can afford to be loose; one that fires during normal
+    work cannot."""
     sandbox_sweep_interval_seconds: int = Field(default=60, ge=1)
 
     @model_validator(mode="after")
@@ -52,7 +60,7 @@ class BrokerSettings(BaseModel):
                 os.environ.get("DSB_IMAGE_GC_TARGET_FREE_MB", str(40 * 1024))
             ),
             image_gc_min_age_seconds=int(os.environ.get("DSB_IMAGE_GC_MIN_AGE_SECONDS", "300")),
-            sandbox_ttl_seconds=int(os.environ.get("DSB_SANDBOX_TTL_SECONDS", "1800")),
+            sandbox_ttl_seconds=int(os.environ.get("DSB_SANDBOX_TTL_SECONDS", "14400")),
             sandbox_sweep_interval_seconds=int(
                 os.environ.get("DSB_SANDBOX_SWEEP_INTERVAL_SECONDS", "60")
             ),

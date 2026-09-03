@@ -102,7 +102,7 @@ gone: a trainer that exits without closing its environment pool, a killed run,
 or a crashed process. Nothing else does, and such sandboxes otherwise hold
 memory and disk until the daemon is cleaned by hand.
 
-The default is 30 minutes, configured with `DSB_SANDBOX_TTL_SECONDS`, and the
+The default is 4 hours, configured with `DSB_SANDBOX_TTL_SECONDS`, and the
 sweep runs every `DSB_SANDBOX_SWEEP_INTERVAL_SECONDS` seconds (default 60). A
 request may set its own `ttl_seconds`. Set `DSB_SANDBOX_TTL_SECONDS=0` to
 disable expiry and return to relying on clients to delete what they create.

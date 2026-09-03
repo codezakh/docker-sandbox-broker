@@ -44,7 +44,10 @@ whole pool running; a killed or crashed run leaves everything it held. Without
 expiry those containers survive until someone removes them by hand.
 
 - The deadline is set at creation from the request's `ttl_seconds`, falling back
-  to `DSB_SANDBOX_TTL_SECONDS` (default 1800).
+  to `DSB_SANDBOX_TTL_SECONDS` (default 14400, four hours). It must exceed the
+  longest single task a sandbox will serve: a measured OpenInstruct rollout has
+  reached 30 minutes, and the step-limit times command-timeout ceiling is over
+  two hours.
 - It is absolute, not idle-based. Activity does not extend it. A task that runs
   longer than the deadline is deleted mid-run, so a client with long tasks must
   raise `ttl_seconds` deliberately.
