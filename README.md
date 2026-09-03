@@ -96,6 +96,22 @@ elsewhere.
 Docker-enabled sandboxes use privileged Docker-in-Docker with host networking.
 They are disabled unless `DSB_ALLOW_DOCKER_ENABLED=true` is set.
 
+Every sandbox is given a deadline when it is created, and a background sweep
+deletes the ones that pass it. This is what reclaims a sandbox whose client is
+gone: a trainer that exits without closing its environment pool, a killed run,
+or a crashed process. Nothing else does, and such sandboxes otherwise hold
+memory and disk until the daemon is cleaned by hand.
+
+The default is 30 minutes, configured with `DSB_SANDBOX_TTL_SECONDS`, and the
+sweep runs every `DSB_SANDBOX_SWEEP_INTERVAL_SECONDS` seconds (default 60). A
+request may set its own `ttl_seconds`. Set `DSB_SANDBOX_TTL_SECONDS=0` to
+disable expiry and return to relying on clients to delete what they create.
+
+The deadline is absolute. It is fixed when the sandbox is created and is not
+extended by activity, so a task that legitimately runs longer than the default
+must ask for a larger `ttl_seconds` up front or it will be deleted mid-run.
+`SandboxView.expires_at` reports the deadline.
+
 The broker records images it pulls or builds in node-local state under
 `/var/tmp/docker-sandbox-broker-$UID` and reclaims unused owned images when the
 Docker filesystem runs low on space. Configure this with `DSB_STATE_DIR`,

@@ -1,7 +1,7 @@
 """Application service coordinating policy, identity, and runtime ownership."""
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from threading import RLock
 
 from ulid import ULID
@@ -29,6 +29,7 @@ class SandboxRecord:
     runtime_id: str
     request: CreateSandboxRequest
     created_at: datetime
+    expires_at: datetime | None
 
 
 class BrokerService:
@@ -51,11 +52,59 @@ class BrokerService:
         sandbox_id = str(ULID())
         created_at = datetime.now(UTC)
         runtime = self._runtime.create(sandbox_id, request)
-        record = SandboxRecord(sandbox_id, runtime.id, request, created_at)
+        record = SandboxRecord(
+            sandbox_id, runtime.id, request, created_at, self._deadline(request, created_at)
+        )
         with self._lock:
             self._records[sandbox_id] = record
-        self._log.info("sandbox_created", sandbox_id=sandbox_id, image=request.image)
+        self._log.info(
+            "sandbox_created",
+            sandbox_id=sandbox_id,
+            image=request.image,
+            expires_at=record.expires_at.isoformat() if record.expires_at else None,
+        )
         return self._view(record, runtime.state)
+
+    def _deadline(self, request: CreateSandboxRequest, created_at: datetime) -> datetime | None:
+        """When this sandbox expires, or None when expiry is disabled.
+
+        The deadline is absolute rather than idle-based: it is fixed at creation
+        and never extended. A task that legitimately runs longer than the
+        default must ask for a larger ttl_seconds up front.
+        """
+        ttl = request.ttl_seconds or self.settings.sandbox_ttl_seconds
+        if ttl <= 0:
+            return None
+        return created_at + timedelta(seconds=ttl)
+
+    def sweep_expired(self, now: datetime | None = None) -> list[str]:
+        """Delete sandboxes past their deadline. Returns the ids removed.
+
+        This is the only thing that reclaims a sandbox whose client is gone --
+        a trainer that exited without closing its environment pool, a killed
+        run, or a crashed process. It owns only sandboxes this broker created.
+
+        ``now`` overrides the clock, so a caller can ask what would expire at a
+        given moment without waiting for it.
+        """
+        now = now or datetime.now(UTC)
+        with self._lock:
+            expired = [
+                record.id
+                for record in self._records.values()
+                if record.expires_at is not None and record.expires_at <= now
+            ]
+        removed = []
+        for sandbox_id in expired:
+            try:
+                self.delete(sandbox_id)
+            except Exception as error:  # one failure must not stop the sweep
+                self._log.warning("sandbox_expiry_failed", sandbox_id=sandbox_id, error=str(error))
+            else:
+                removed.append(sandbox_id)
+        if removed:
+            self._log.info("sandboxes_expired", count=len(removed), sandbox_ids=removed)
+        return removed
 
     def get(self, sandbox_id: str) -> SandboxView:
         record = self._record(sandbox_id)
@@ -94,6 +143,9 @@ class BrokerService:
         with self._lock:
             self._records.pop(sandbox_id, None)
         self._log.info("sandbox_deleted", sandbox_id=sandbox_id)
+
+    def log_sweep_failure(self) -> None:
+        self._log.exception("sandbox_sweep_failed")
 
     def _record(self, sandbox_id: str) -> SandboxRecord:
         with self._lock:
@@ -135,4 +187,5 @@ class BrokerService:
             run_id=record.request.run_id,
             docker_enabled=record.request.features.docker,
             created_at=record.created_at,
+            expires_at=record.expires_at,
         )

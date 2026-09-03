@@ -1,7 +1,9 @@
 """FastAPI application exposing the versioned broker protocol."""
 
+import asyncio
 import secrets
 from collections.abc import Callable
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import Body, Depends, FastAPI, Header, Query, Response
 from fastapi.responses import JSONResponse
@@ -36,7 +38,24 @@ def create_app(
     service = BrokerService(active_settings, active_runtime)
     authorize = _authorizer(active_settings.auth_token)
 
-    app = FastAPI(title="Docker Sandbox Broker", version="0.1.0")
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        """Run the expiry sweep for as long as the server is up.
+
+        The sweep cannot be driven by request handlers alone. The case it exists
+        for is a client that stopped making requests -- a trainer that exited
+        without closing its environment pool, or a killed run -- so nothing
+        would trigger it.
+        """
+        task = asyncio.create_task(_sweep_forever(service, active_settings))
+        try:
+            yield
+        finally:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+    app = FastAPI(title="Docker Sandbox Broker", version="0.1.0", lifespan=lifespan)
     app.state.service = service
 
     @app.exception_handler(BrokerError)
@@ -154,3 +173,17 @@ def _authorizer(expected_token: str) -> Callable:
             raise HTTPException(status_code=401, detail="invalid broker credentials")
 
     return authorize
+
+
+async def _sweep_forever(service: BrokerService, settings: BrokerSettings) -> None:
+    """Delete expired sandboxes on an interval until cancelled.
+
+    Runs the sweep in a worker thread because the runtime calls are blocking,
+    and never lets one failure end the loop.
+    """
+    while True:
+        await asyncio.sleep(settings.sandbox_sweep_interval_seconds)
+        try:
+            await asyncio.to_thread(service.sweep_expired)
+        except Exception:  # the sweep must outlive any one failure
+            service.log_sweep_failure()

@@ -95,6 +95,21 @@ environment = SWERLSandboxEnv(
 )
 ```
 
+`LocalBrokerBackend` also accepts `ttl_seconds`, which sets the sandbox deadline
+for that environment. Omitted, the broker's configured default applies. Raise it
+for a rollout that runs longer than that default:
+
+```python
+environment = SWERLSandboxEnv(
+    backend="local_broker",
+    image="example/image:tag",
+    ttl_seconds=7200,
+)
+```
+
+OpenInstruct's `EnvironmentPool` has no teardown, so a run that ends leaves its
+pool's sandboxes running. The deadline bounds how long they survive.
+
 The broker does not replace OpenInstruct's dataset loading, environment pooling,
 rollout, or reward logic. Those continue to run in OpenInstruct and call the
 adapter through its existing backend interface.

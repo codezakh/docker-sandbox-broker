@@ -23,6 +23,11 @@ class BrokerSettings(BaseModel):
     image_gc_min_free_mb: int = Field(default=20 * 1024, ge=0)
     image_gc_target_free_mb: int = Field(default=40 * 1024, ge=0)
     image_gc_min_age_seconds: int = Field(default=300, ge=0)
+    sandbox_ttl_seconds: int = Field(default=1800, ge=0)
+    """Default lifetime for a sandbox whose request does not set one. 0 disables
+    expiry entirely, which returns the broker to relying on clients to delete
+    what they create."""
+    sandbox_sweep_interval_seconds: int = Field(default=60, ge=1)
 
     @model_validator(mode="after")
     def image_gc_target_exceeds_minimum(self) -> "BrokerSettings":
@@ -47,6 +52,10 @@ class BrokerSettings(BaseModel):
                 os.environ.get("DSB_IMAGE_GC_TARGET_FREE_MB", str(40 * 1024))
             ),
             image_gc_min_age_seconds=int(os.environ.get("DSB_IMAGE_GC_MIN_AGE_SECONDS", "300")),
+            sandbox_ttl_seconds=int(os.environ.get("DSB_SANDBOX_TTL_SECONDS", "1800")),
+            sandbox_sweep_interval_seconds=int(
+                os.environ.get("DSB_SANDBOX_SWEEP_INTERVAL_SECONDS", "60")
+            ),
         )
 
 

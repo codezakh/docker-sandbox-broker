@@ -29,6 +29,13 @@ class CreateSandboxRequest(BaseModel):
     features: SandboxFeatures = Field(default_factory=SandboxFeatures)
     resources: ResourceLimits = Field(default_factory=ResourceLimits)
     run_id: str | None = Field(default=None, max_length=128)
+    ttl_seconds: int | None = Field(default=None, ge=1)
+    """Delete this sandbox once it is this old, whatever the client does.
+
+    A client that exits without deleting its sandboxes leaks them; nothing else
+    reclaims them. Omitted, the broker applies its configured default. Set it
+    above the longest task this sandbox will run, because the deadline is
+    absolute and is not extended by activity."""
 
     @field_validator("command")
     @classmethod
@@ -45,6 +52,9 @@ class SandboxView(BaseModel):
     run_id: str | None
     docker_enabled: bool
     created_at: datetime
+    expires_at: datetime | None = None
+    """When the broker will delete this sandbox regardless of client activity,
+    or None when expiry is disabled."""
 
 
 class ExecRequest(BaseModel):

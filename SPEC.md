@@ -33,6 +33,32 @@ wire protocol, full SDK, account model, or unrelated product surface.
 7. **Keep repositories independent.** This is a sibling Git repository under the
    project umbrella, with its own uv environment and history.
 
+## Sandbox expiry
+
+A sandbox is created with an absolute deadline and a background sweep deletes
+the ones that pass it.
+
+The broker cannot rely on clients to delete what they create. OpenInstruct's
+`EnvironmentPool` has no teardown method, so a training run that ends leaves its
+whole pool running; a killed or crashed run leaves everything it held. Without
+expiry those containers survive until someone removes them by hand.
+
+- The deadline is set at creation from the request's `ttl_seconds`, falling back
+  to `DSB_SANDBOX_TTL_SECONDS` (default 1800).
+- It is absolute, not idle-based. Activity does not extend it. A task that runs
+  longer than the deadline is deleted mid-run, so a client with long tasks must
+  raise `ttl_seconds` deliberately.
+- `DSB_SANDBOX_TTL_SECONDS=0` disables expiry.
+- The sweep runs on an interval rather than only inside request handlers,
+  because the case it exists for is a client that has stopped making requests.
+- It deletes through the same path as an explicit delete, so it removes only
+  sandboxes carrying this broker's identity.
+- `SandboxView.expires_at` reports the deadline.
+
+An idle timeout was considered and rejected as more machinery than the problem
+needs. It would keep a quiet but live task alive, at the cost of touching the
+record on every operation.
+
 ## Broker-owned image cache
 
 Prebuilt Terminal-Bench, Harbor, and TMax images are pulled by the broker when

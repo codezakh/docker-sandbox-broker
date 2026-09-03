@@ -28,6 +28,7 @@ class LocalBrokerBackend(SandboxBackend):
         image: str,
         timeout: int = 120,
         mem_limit: str = "4g",
+        ttl_seconds: int | None = None,
         **_kwargs,
     ):
         token = os.environ.get("DSB_AUTH_TOKEN")
@@ -39,6 +40,10 @@ class LocalBrokerBackend(SandboxBackend):
         self._image = image
         self._timeout = timeout
         self._memory_mb = self._parse_memory_mb(mem_limit)
+        # None leaves the broker's configured default in force. Raise it through
+        # OpenInstruct's tool_configs for a rollout that legitimately outlives
+        # that default; the deadline is absolute and activity does not extend it.
+        self._ttl_seconds = ttl_seconds
         self._client: BrokerClient | None = None
         self._sandbox: Sandbox | None = None
         self._log = get_logger().bind(component="openinstruct_backend")
@@ -65,6 +70,7 @@ class LocalBrokerBackend(SandboxBackend):
             image=self._image,
             resources=ResourceLimits(memory_mb=self._memory_mb, cpus=1),
             run_id="open-instruct-rl",
+            ttl_seconds=self._ttl_seconds,
         )
         try:
             sandbox = client.create(request)
