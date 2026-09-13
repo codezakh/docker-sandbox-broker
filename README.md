@@ -75,6 +75,32 @@ export DSB_AUTH_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(
 uv run docker-sandbox-broker --uds "/run/user/$(id -u)/docker-sandbox-broker.sock"
 ```
 
+### Start with rotating logs
+
+From this repository, run in a tmux window:
+
+```bash
+just start --allow-docker
+```
+
+This runs the host broker in the foreground and captures both stdout and stderr,
+including startup errors, in `/var/tmp/docker-sandbox-broker-$UID/logs/broker.log`.
+It rotates at approximately 10 MiB, retaining five backups (`broker.log.1` through
+`broker.log.5`, newest first): approximately 60 MiB total. Rotation requires no
+cron job or extra package. Ctrl-C is forwarded to the broker process group.
+Use only one writer per log path. Omit `--allow-docker` if privileged Compose
+controllers are unnecessary. Stop the previous broker at a planned safe point
+before replacing it; the command does not replace an existing broker.
+
+```bash
+LOG_MAX_BYTES=20971520 LOG_BACKUPS=3 just start --allow-docker
+# Watch independently; closing this viewer cannot block the broker.
+tail -F /var/tmp/docker-sandbox-broker-$(id -u)/logs/broker.log
+```
+
+Set `LOG_FILE` to change the log path. Keep it on node-local storage. The launcher
+creates new files privately. This command requires `just`, `python3`, and `uv`.
+
 For the Harbor development-container workflow, use the host launcher instead:
 
 ```bash
