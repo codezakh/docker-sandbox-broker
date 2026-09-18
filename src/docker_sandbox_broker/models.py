@@ -84,6 +84,30 @@ class BuildImageResponse(BaseModel):
     image: str
 
 
+class BuildStatus(BaseModel):
+    accepting: bool
+    workers: int
+    queue_limit: int
+    max_context_bytes: int
+    active: int
+    queued: int
+    context_bytes: int
+    oldest_running_seconds: float | None
+    oldest_queued_seconds: float | None
+    last_finished_seconds_ago: float | None
+    succeeded_total: int
+    failed_total: int
+    rejected_total: int
+    cancelled_queued_total: int
+
+
+class StatusResponse(BaseModel):
+    broker_id: str
+    uptime_seconds: float
+    builds: BuildStatus
+    now: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
 class ErrorResponse(BaseModel):
     code: str
     message: str

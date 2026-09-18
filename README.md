@@ -96,6 +96,79 @@ the test-output directory; test images and containers are cleaned up.
 
 ## Running
 
+### Build throughput and overload
+
+An agent inside a development container can read authenticated, in-memory status
+using the existing token and socket through the consumer helper:
+
+```python
+from terminal_agents_rl.broker import sandbox_client
+
+with sandbox_client() as client:
+    print(client.status(timeout=5).model_dump_json(indent=2))
+```
+
+This calls `GET /v1/status`. The response includes `broker_id`, `now`,
+`uptime_seconds`, and `builds`: configured `workers`, `queue_limit`,
+`max_context_bytes`; current `active`, `queued`, `context_bytes`, and `accepting`;
+`oldest_running_seconds`, `oldest_queued_seconds`, `last_finished_seconds_ago`;
+and `succeeded_total`, `failed_total`, `rejected_total`, `cancelled_queued_total`.
+Ages are monotonic elapsed seconds, or null when there is no corresponding work
+or completion. Totals are cumulative since this application instance started,
+not rolling windows; compare successive polls for progress. Cache hits count as
+successful build requests, and active requests include duplicate-cache waiters.
+Rejected totals count capacity/shutdown 503s, not authentication/validation errors.
+Cancelled running waiters remain active until their worker finishes and then
+count toward success/failure. `accepting` means admission is open, not that there
+is free capacity. No credentials, commands, contexts, or task paths are returned.
+
+Status never calls Docker or acquires cache locks and uses no worker thread.
+It reports build activity, not Docker health or overall rollout progress. Uptime
+and counters reset on restart. The endpoint requires the same bearer token as
+sandbox operations; `/health` stays unauthenticated. `BrokerClient.status()` has
+a five-second default timeout, independently overridable for each call.
+
+Build requests have a dedicated thread executor. Waiting builds do not occupy
+Starlette's shared request workers; health and authentication run asynchronously.
+The defaults can be set on the host broker:
+
+| Setting | Default | Meaning |
+| --- | ---: | --- |
+| `DSB_BUILD_WORKERS` | 4 | Concurrent build requests, including cache lookups and duplicate waiters |
+| `DSB_BUILD_QUEUE_SIZE` | 64 | Additional requests allowed to wait without holding threads |
+| `DSB_BUILD_MAX_INFLIGHT_MB` | 256 | MiB of context bytes retained by admitted running and queued builds |
+
+Queue or byte-budget saturation returns HTTP 503, code `build_capacity_exceeded`,
+`retryable: true`, and `Retry-After: 1`. Consumers should retry with backoff and
+jitter within their overall setup deadline; the Python client does not retry
+automatically. An individual context exceeding either the upload limit or the
+build byte budget receives 413. FastAPI receives request bodies before admission;
+the byte budget bounds admitted contexts, not all HTTP buffering or total RSS.
+
+Cancelling a queued handler frees its admission immediately. Cancelling a handler
+whose build has started leaves its capacity reserved until the blocking worker
+call finishes. A client disconnect does not necessarily cancel an ASGI handler;
+this is not a Docker build cancellation API. Graceful shutdown drains admitted
+work. Existing Docker timeouts still apply. Four build workers are a conservative
+starting point, not a measured optimum for every host.
+
+Structured logs include `request_finished` (HTTP duration and route template),
+`build_admitted`, `build_started` (queue seconds and active/queued counts),
+`build_finished` (execution seconds and outcome), and `build_rejected`.
+`runtime_operation` measures Docker builds and sandbox create/inspect/exec/delete
+operations. Sandbox operation durations include their internal waits and setup;
+they are not pure Docker RPC measurements. Existing `image_cache_hit`/`image_built`
+events identify cache outcomes. A generated `request_id` correlates these events
+across worker threads. Timing logs omit bodies, commands, query strings, tokens,
+and exception text. High queue time suggests admission pressure; high
+`docker_build` time points to the build/daemon path.
+
+This isolates builds only: long-running sandbox commands still share the normal
+request pool with lifecycle operations. Cache/GC locks remain unchanged and can
+still delay image acquisition. Keep one broker process per identity/state directory.
+
+### Start the broker
+
 Set a bearer token and serve over a user-owned Unix socket:
 
 ```bash

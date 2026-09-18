@@ -73,6 +73,25 @@ other than absence remain errors, rather than being silently treated as missing.
 
 ## Broker-owned image cache
 
+`GET /v1/status` is an authenticated, asynchronous snapshot of application uptime,
+build limits, running/queued counts, admitted context bytes, oldest ages, age of
+last completion, and cumulative success/failure/capacity-rejection/queued-cancellation
+counts. State lives on the application event loop; reading it never calls Docker,
+uses a worker thread, or waits on cache locks. Running handler cancellation does
+not remove work from status until its worker completes. Metrics reset on restart
+and include cache hits as successful build requests. This endpoint does not claim
+Docker health and returns no request payloads. See README for field semantics.
+
+HTTP builds use a dedicated bounded executor (four workers and 64 asynchronous
+waiters by default), independent of synchronous sandbox request workers. A
+256 MiB admission budget bounds retained context bytes. Saturation returns a
+retryable 503 with `Retry-After`; oversized individual requests return 413.
+Cancellation of a running handler does not return its worker budget until the
+blocking call finishes. Shutdown drains admitted builds. Health and token
+authentication do not consume synchronous request workers. See README for host
+configuration and timing events. These limits apply to direct HTTP builds;
+Compose/DinD work and direct Python runtime calls are outside this executor.
+
 Direct builds use a `context-v1-<sha256>` tag derived from the Dockerfile selector
 and the complete uploaded archive bytes. Identical requests reuse an existing
 image without invoking Docker's builder; changed scripts or fixtures produce a

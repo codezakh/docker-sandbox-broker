@@ -23,6 +23,7 @@ from docker_sandbox_broker.errors import (
 from docker_sandbox_broker.image_cache import ImageCache
 from docker_sandbox_broker.logging import get_logger
 from docker_sandbox_broker.models import CreateSandboxRequest, ExecRequest, ExecResult
+from docker_sandbox_broker.timing import timed_operation
 
 MANAGED_BY_LABEL = "me.zaidkhan.docker-sandbox-broker.managed"
 BROKER_ID_LABEL = "me.zaidkhan.docker-sandbox-broker.broker-id"
@@ -124,6 +125,7 @@ class DockerRuntime:
                 ) from retry_error
         self._image_cache.record(tag, image.id, "built")
 
+    @timed_operation("docker_build")
     def _build_image(self, tag: str, dockerfile: str, context: bytes):
         image, _logs = self._client.images.build(
             fileobj=io.BytesIO(context),
@@ -140,6 +142,7 @@ class DockerRuntime:
         )
         return image
 
+    @timed_operation("sandbox_create")
     def create(self, sandbox_id: str, request: CreateSandboxRequest) -> RuntimeSandbox:
         image_id = self._ensure_image(request.image)
         labels = {
@@ -164,6 +167,7 @@ class DockerRuntime:
                 raise RuntimeOperationError(f"could not create sandbox: {error}") from error
         return RuntimeSandbox(id=container.id, state=_state(container))
 
+    @timed_operation("sandbox_inspect")
     def inspect(self, runtime_id: str) -> RuntimeSandbox:
         try:
             container = self._client.containers.get(runtime_id)
@@ -174,6 +178,7 @@ class DockerRuntime:
             raise RuntimeOperationError(f"could not inspect sandbox: {error}") from error
         return RuntimeSandbox(id=container.id, state=_state(container))
 
+    @timed_operation("sandbox_exec")
     def exec(self, runtime_id: str, request: ExecRequest, output_limit: int) -> ExecResult:
         container = self._container(runtime_id)
         command = _wrapped_command(request.command, request.timeout_seconds)
@@ -278,6 +283,7 @@ class DockerRuntime:
         if not accepted:
             raise RuntimeOperationError("Docker rejected archive upload")
 
+    @timed_operation("sandbox_delete")
     def delete(self, runtime_id: str, sandbox_id: str, broker_id: str) -> None:
         try:
             container = self._client.containers.get(runtime_id)

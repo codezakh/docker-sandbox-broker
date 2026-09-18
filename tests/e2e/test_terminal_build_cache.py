@@ -49,6 +49,9 @@ from docker_sandbox_broker.models import CreateSandboxRequest
 assert not Path('/var/run/docker.sock').exists()
 tag = build_context(Path(sys.argv[1]))
 with sandbox_client() as client:
+    status = client.status(timeout=3)
+    assert status.builds.active == status.builds.queued == 0
+    assert status.builds.succeeded_total >= 1
     box = client.create(CreateSandboxRequest(image=tag))
     try:
         result = box.process.exec('cat /marker')
@@ -98,3 +101,13 @@ with sandbox_client() as client:
         events = [item.get("event") for item in logs]
         assert events.count("image_built") == 2
         assert events.count("image_cache_hit") == 1
+        assert events.count("build_started") == 3
+        assert events.count("build_finished") == 3
+        builds = [item for item in logs if item.get("operation") == "docker_build"]
+        assert len(builds) == 2
+        assert all(item["duration_seconds"] >= 0 for item in builds)
+        for build in builds:
+            related = {
+                item["event"] for item in logs if item.get("request_id") == build["request_id"]
+            }
+            assert {"build_started", "build_finished", "request_finished"} <= related
