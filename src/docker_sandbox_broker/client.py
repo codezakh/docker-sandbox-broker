@@ -10,6 +10,7 @@ from docker_sandbox_broker.models import (
     ExecRequest,
     ExecResult,
     SandboxView,
+    StatusResponse,
 )
 
 
@@ -38,6 +39,11 @@ class BrokerClient:
             transport=active_transport,
             timeout=300,
         )
+
+    def status(self, *, timeout: float = 5.0) -> StatusResponse:
+        """Read in-memory broker/build status without probing Docker."""
+        response = self._request("GET", "/v1/status", timeout=timeout)
+        return StatusResponse.model_validate(response.json())
 
     def create(self, request: CreateSandboxRequest) -> "Sandbox":
         response = self._request("POST", "/v1/sandboxes", json=request.model_dump())

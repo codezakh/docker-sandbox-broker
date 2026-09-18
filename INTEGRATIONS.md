@@ -1,5 +1,12 @@
 # Consumer integrations
 
+For autonomous-run diagnostics, use `BrokerClient.status(timeout=5)` or
+authenticated `GET /v1/status`. Existing `DSB_AUTH_TOKEN` and socket/URL settings
+are sufficient, including inside development containers. The snapshot reports
+build activity without contacting Docker, so agents can compare completion
+counters and queue ages even when build workers are stalled. It is observational:
+there is no restart, cleanup, or cancellation action. See README for field meanings.
+
 Build admission is bounded independently of sandbox operations. A saturated
 broker returns HTTP 503 with `code=build_capacity_exceeded`, `retryable=true`,
 and `Retry-After: 1`. The Python client exposes the retryable error but does not

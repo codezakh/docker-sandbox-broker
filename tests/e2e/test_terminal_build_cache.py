@@ -49,6 +49,9 @@ from docker_sandbox_broker.models import CreateSandboxRequest
 assert not Path('/var/run/docker.sock').exists()
 tag = build_context(Path(sys.argv[1]))
 with sandbox_client() as client:
+    status = client.status(timeout=3)
+    assert status.builds.active == status.builds.queued == 0
+    assert status.builds.succeeded_total >= 1
     box = client.create(CreateSandboxRequest(image=tag))
     try:
         result = box.process.exec('cat /marker')

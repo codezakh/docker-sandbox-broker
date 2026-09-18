@@ -98,6 +98,36 @@ the test-output directory; test images and containers are cleaned up.
 
 ### Build throughput and overload
 
+An agent inside a development container can read authenticated, in-memory status
+using the existing token and socket through the consumer helper:
+
+```python
+from terminal_agents_rl.broker import sandbox_client
+
+with sandbox_client() as client:
+    print(client.status(timeout=5).model_dump_json(indent=2))
+```
+
+This calls `GET /v1/status`. The response includes `broker_id`, `now`,
+`uptime_seconds`, and `builds`: configured `workers`, `queue_limit`,
+`max_context_bytes`; current `active`, `queued`, `context_bytes`, and `accepting`;
+`oldest_running_seconds`, `oldest_queued_seconds`, `last_finished_seconds_ago`;
+and `succeeded_total`, `failed_total`, `rejected_total`, `cancelled_queued_total`.
+Ages are monotonic elapsed seconds, or null when there is no corresponding work
+or completion. Totals are cumulative since this application instance started,
+not rolling windows; compare successive polls for progress. Cache hits count as
+successful build requests, and active requests include duplicate-cache waiters.
+Rejected totals count capacity/shutdown 503s, not authentication/validation errors.
+Cancelled running waiters remain active until their worker finishes and then
+count toward success/failure. `accepting` means admission is open, not that there
+is free capacity. No credentials, commands, contexts, or task paths are returned.
+
+Status never calls Docker or acquires cache locks and uses no worker thread.
+It reports build activity, not Docker health or overall rollout progress. Uptime
+and counters reset on restart. The endpoint requires the same bearer token as
+sandbox operations; `/health` stays unauthenticated. `BrokerClient.status()` has
+a five-second default timeout, independently overridable for each call.
+
 Build requests have a dedicated thread executor. Waiting builds do not occupy
 Starlette's shared request workers; health and authentication run asynchronously.
 The defaults can be set on the host broker:

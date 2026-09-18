@@ -4,6 +4,7 @@ import asyncio
 import secrets
 from collections.abc import Callable
 from contextlib import asynccontextmanager, suppress
+from time import monotonic
 
 from fastapi import Body, Depends, FastAPI, Header, Query, Response
 from fastapi.responses import JSONResponse
@@ -19,6 +20,7 @@ from docker_sandbox_broker.models import (
     ExecResult,
     HealthResponse,
     SandboxView,
+    StatusResponse,
 )
 from docker_sandbox_broker.runtime import DockerRuntime, SandboxRuntime
 from docker_sandbox_broker.service import BrokerService
@@ -38,6 +40,7 @@ def create_app(
         image_gc_min_age_seconds=active_settings.image_gc_min_age_seconds,
     )
     service = BrokerService(active_settings, active_runtime)
+    started_at = monotonic()
     authorize = _authorizer(active_settings.auth_token)
     builds = BuildExecutor(
         active_settings.build_workers,
@@ -82,6 +85,14 @@ def create_app(
     @app.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
         return HealthResponse(broker_id=active_settings.broker_id)
+
+    @app.get("/v1/status", response_model=StatusResponse, dependencies=[Depends(authorize)])
+    async def status() -> StatusResponse:
+        return StatusResponse(
+            broker_id=active_settings.broker_id,
+            uptime_seconds=monotonic() - started_at,
+            builds=builds.snapshot(),
+        )
 
     @app.post(
         "/v1/images/build",
