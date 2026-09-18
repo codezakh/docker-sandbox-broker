@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import docker
 import httpx
@@ -20,6 +21,8 @@ def live_broker(tmp_path):
     broker_id = f"pytest-live-{str(ULID()).lower()}"
     image_repository = f"docker-sandbox-broker/{broker_id}"
     socket_path = tmp_path / "broker.sock"
+    if socket_dir := os.environ.get("DSB_TEST_SOCKET_DIR"):
+        socket_path = Path(socket_dir) / f"{broker_id}.sock"
     log_path = tmp_path / "broker.log"
     environment = {
         **os.environ,
@@ -53,6 +56,7 @@ def live_broker(tmp_path):
                 process.kill()
                 process.wait(timeout=10)
             _remove_test_images(image_repository)
+            socket_path.unlink(missing_ok=True)
 
 
 @pytest.fixture

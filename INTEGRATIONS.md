@@ -1,5 +1,14 @@
 # Consumer integrations
 
+`POST /v1/images/build` reuses direct builds with identical archive bytes and
+Dockerfile selectors across clients and broker restarts. The response shape is
+unchanged. Use deterministic tar metadata for reliable hits; `terminal-agents-rl`
+already supplies this through `task_images.context_tar`. Post-install scripts
+inside the context participate in the key. Mutable downloads and base tags do
+not automatically refresh; see the cache semantics in `SPEC.md`. Harbor's
+`force_build` selects a Dockerfile instead of a prebuilt image; it does not bypass
+this broker cache. Compose's inner Docker builds are outside this cache.
+
 Harbor and OpenInstruct keep responsibility for task orchestration. The Docker
 Sandbox Broker replaces only the sandbox provider: it creates containers and
 provides process and filesystem operations over an authenticated HTTP API.

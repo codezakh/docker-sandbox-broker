@@ -9,12 +9,13 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from threading import RLock
+from threading import Lock, RLock
 from typing import Literal
 
 from docker.errors import DockerException, ImageNotFound
 from pydantic import BaseModel, Field
 
+from docker_sandbox_broker.errors import SandboxOwnershipError
 from docker_sandbox_broker.logging import get_logger
 
 
@@ -49,8 +50,42 @@ class ImageCache:
         self._free_bytes = free_bytes or self._docker_free_bytes
         self._lock = RLock()
         self._reservations: dict[str, int] = {}
+        self._build_gates: dict[str, tuple[Lock, int]] = {}
         self._log = get_logger().bind(component="image_cache")
         self._records = self._load()
+
+    @contextmanager
+    def building(self, reference: str):
+        """Serialize one reference and protect it from GC, including waiting callers."""
+        with self._lock:
+            gate, users = self._build_gates.get(reference, (Lock(), 0))
+            self._build_gates[reference] = (gate, users + 1)
+        try:
+            with gate:
+                yield
+        finally:
+            with self._lock:
+                _, users = self._build_gates[reference]
+                if users == 1:
+                    del self._build_gates[reference]
+                else:
+                    self._build_gates[reference] = (gate, users - 1)
+
+    def reuse_built(self, reference: str, labels: dict[str, str]) -> bool:
+        """Validate an owned build in Docker and refresh its collection grace period."""
+        with self._lock:
+            try:
+                image = self._client.images.get(reference)
+            except ImageNotFound:
+                if reference in self._records:
+                    self._forget(reference)
+                return False
+            record = self._records.get(reference)
+            matches = all(image.labels.get(key) == value for key, value in labels.items())
+            if not matches or (record is not None and record.image_id != image.id):
+                raise SandboxOwnershipError(f"build cache identity mismatch: {reference}")
+            self.record(reference, image.id, "built")
+            return True
 
     def record(self, reference: str, image_id: str, origin: Literal["built", "pulled"]) -> None:
         with self._lock:
@@ -131,6 +166,8 @@ class ImageCache:
         return removed, free_bytes
 
     def _remove_if_eligible(self, record: CachedImage, active_images: set[str]) -> bool:
+        if record.reference in self._build_gates:
+            return False
         if datetime.now(UTC) - record.last_used_at < self._min_age:
             return False
         try:

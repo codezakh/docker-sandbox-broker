@@ -44,7 +44,7 @@ class BrokerService:
         self._validate_upload_size(context)
         build_id = str(ULID())
         image = self._runtime.build_image(build_id, dockerfile, context)
-        self._log.info("image_built", build_id=build_id, image=image)
+        self._log.info("image_resolved", build_id=build_id, image=image)
         return image
 
     def create(self, request: CreateSandboxRequest) -> SandboxView:
