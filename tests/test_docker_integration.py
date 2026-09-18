@@ -6,8 +6,10 @@ import time
 import docker
 import pytest
 from docker.errors import ImageNotFound
+from fastapi.testclient import TestClient
 from ulid import ULID
 
+from docker_sandbox_broker.api import create_app
 from docker_sandbox_broker.config import BrokerSettings
 from docker_sandbox_broker.models import (
     CreateSandboxRequest,
@@ -56,6 +58,32 @@ def dind_service(tmp_path):
 
 
 def describe_direct_sandbox_contract():
+    def it_lists_and_deletes_a_container_removed_outside_the_broker(direct_service):
+        """An externally removed real container cannot break listing or idempotent deletion."""
+        app = create_app(settings=direct_service.settings, runtime=direct_service._runtime)
+        token = direct_service.settings.auth_token
+        with TestClient(app, headers={"Authorization": f"Bearer {token}"}) as client:
+            ids = []
+            try:
+                for _ in range(2):
+                    response = client.post("/v1/sandboxes", json={"image": "alpine:3.20"})
+                    assert response.status_code == 201
+                    ids.append(response.json()["id"])
+                record = app.state.service._records[ids[0]]
+                direct_service._runtime._client.containers.get(record.runtime_id).remove(force=True)
+                response = client.get("/v1/sandboxes")
+                assert response.status_code == 200
+                assert {item["id"]: item["state"] for item in response.json()} == {
+                    ids[0]: "missing",
+                    ids[1]: "running",
+                }
+                assert client.delete(f"/v1/sandboxes/{ids[0]}").status_code == 204
+                assert client.delete(f"/v1/sandboxes/{ids[0]}").status_code == 204
+                assert [item["id"] for item in client.get("/v1/sandboxes").json()] == [ids[1]]
+            finally:
+                for sandbox_id in ids:
+                    client.delete(f"/v1/sandboxes/{sandbox_id}")
+
     def it_builds_a_tiny_harbor_style_docker_context(direct_service):
         """Builds and executes a tiny Harbor-style Dockerfile without leaking resources."""
         context = io.BytesIO()

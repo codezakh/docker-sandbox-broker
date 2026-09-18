@@ -165,8 +165,13 @@ class DockerRuntime:
         return RuntimeSandbox(id=container.id, state=_state(container))
 
     def inspect(self, runtime_id: str) -> RuntimeSandbox:
-        container = self._container(runtime_id)
-        container.reload()
+        try:
+            container = self._client.containers.get(runtime_id)
+            container.reload()
+        except NotFound:
+            return RuntimeSandbox(id=runtime_id, state="missing")
+        except DockerException as error:
+            raise RuntimeOperationError(f"could not inspect sandbox: {error}") from error
         return RuntimeSandbox(id=container.id, state=_state(container))
 
     def exec(self, runtime_id: str, request: ExecRequest, output_limit: int) -> ExecResult:
@@ -278,6 +283,10 @@ class DockerRuntime:
             container = self._client.containers.get(runtime_id)
         except NotFound:
             return
+        except DockerException as error:
+            raise RuntimeOperationError(
+                f"could not inspect sandbox for deletion: {error}"
+            ) from error
         labels = container.labels or {}
         expected = {
             MANAGED_BY_LABEL: "true",

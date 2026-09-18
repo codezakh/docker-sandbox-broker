@@ -62,6 +62,15 @@ An idle timeout was considered and rejected as more machinery than the problem
 needs. It would keep a quiet but live task alive, at the cost of touching the
 record on every operation.
 
+## Missing sandboxes
+
+Sandbox listings snapshot broker records before inspecting Docker. If a recorded
+container has disappeared, list and get return its existing identity with state
+`missing`, so callers can still find and delete stale records. DELETE remains
+idempotent for missing containers. Concurrent deletion may leave a `missing`
+entry in an already-started listing; the next listing omits it. Docker failures
+other than absence remain errors, rather than being silently treated as missing.
+
 ## Broker-owned image cache
 
 Direct builds use a `context-v1-<sha256>` tag derived from the Dockerfile selector

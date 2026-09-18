@@ -113,8 +113,10 @@ class BrokerService:
 
     def list(self) -> list[SandboxView]:
         with self._lock:
-            ids = list(self._records)
-        return [self.get(sandbox_id) for sandbox_id in ids]
+            records = list(self._records.values())
+        return [
+            self._view(record, self._runtime.inspect(record.runtime_id).state) for record in records
+        ]
 
     def exec(self, sandbox_id: str, request: ExecRequest) -> ExecResult:
         record = self._record(sandbox_id)
@@ -180,6 +182,8 @@ class BrokerService:
     @staticmethod
     def _view(record: SandboxRecord, runtime_state: str) -> SandboxView:
         state = SandboxState.RUNNING if runtime_state == "running" else SandboxState.STOPPED
+        if runtime_state == "missing":
+            state = SandboxState.MISSING
         return SandboxView(
             id=record.id,
             image=record.request.image,
