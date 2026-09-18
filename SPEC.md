@@ -62,7 +62,40 @@ An idle timeout was considered and rejected as more machinery than the problem
 needs. It would keep a quiet but live task alive, at the cost of touching the
 record on every operation.
 
+## Missing sandboxes
+
+Sandbox listings snapshot broker records before inspecting Docker. If a recorded
+container has disappeared, list and get return its existing identity with state
+`missing`, so callers can still find and delete stale records. DELETE remains
+idempotent for missing containers. Concurrent deletion may leave a `missing`
+entry in an already-started listing; the next listing omits it. Docker failures
+other than absence remain errors, rather than being silently treated as missing.
+
 ## Broker-owned image cache
+
+Direct builds use a `context-v1-<sha256>` tag derived from the Dockerfile selector
+and the complete uploaded archive bytes. Identical requests reuse an existing
+image without invoking Docker's builder; changed scripts or fixtures produce a
+different tag. Archive metadata is part of the key: consumers should send a
+deterministic tar (as `terminal-agents-rl` already does). This is a conservative
+request cache, not Dockerfile dependency analysis or a hash of the resulting image.
+
+The broker checks its ownership and build-key labels and any recorded immutable
+image ID before reuse. A conflicting tag fails safely without being overwritten.
+Owned images can be rediscovered after restart or missing inventory. Cache hits
+refresh the normal GC grace period. Per-reference gates collapse concurrent
+requests and protect builds and waiting callers from collection; different
+contexts can build concurrently. Run one broker process per broker identity and
+state directory: gates and inventory synchronization are process-local.
+
+Mutable base tags, downloaded packages, random values, and time-dependent script
+output are not included in this key. Reuse freezes the previously built result;
+pin inputs for reproducibility. There is no new force-refresh API in this version.
+Changing the context (for example a deliberate Dockerfile cache-busting change)
+misses this cache, but Docker may still reuse unchanged layers. This optimization
+does not cover builds inside Compose's separate DinD daemon. Legacy ULID-tagged
+images remain under normal GC; the first request after upgrade builds a new
+content tag. ULIDs continue to identify requests and sandboxes in logs.
 
 Prebuilt Terminal-Bench, Harbor, and TMax images are pulled by the broker when
 they are not already present in the host Docker daemon. The broker records an

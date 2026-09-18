@@ -1,7 +1,9 @@
 """Docker runtime implementation hidden behind the broker API."""
 
 import contextlib
+import hashlib
 import io
+import json
 import os
 import shlex
 import tarfile
@@ -19,12 +21,14 @@ from docker_sandbox_broker.errors import (
     SandboxOwnershipError,
 )
 from docker_sandbox_broker.image_cache import ImageCache
+from docker_sandbox_broker.logging import get_logger
 from docker_sandbox_broker.models import CreateSandboxRequest, ExecRequest, ExecResult
 
 MANAGED_BY_LABEL = "me.zaidkhan.docker-sandbox-broker.managed"
 BROKER_ID_LABEL = "me.zaidkhan.docker-sandbox-broker.broker-id"
 SANDBOX_ID_LABEL = "me.zaidkhan.docker-sandbox-broker.sandbox-id"
 RUN_ID_LABEL = "me.zaidkhan.docker-sandbox-broker.run-id"
+BUILD_KEY_LABEL = "me.zaidkhan.docker-sandbox-broker.build-key"
 DOCKER_ENABLED_LABEL = "me.zaidkhan.docker-sandbox-broker.docker-enabled"
 TRANSFER_DIR = "/broker-transfer"
 
@@ -82,7 +86,29 @@ class DockerRuntime:
 
     def build_image(self, build_id: str, dockerfile: str, context: bytes) -> str:
         _validate_tar(context)
-        tag = f"docker-sandbox-broker/{self._broker_id}:{build_id.lower()}"
+        header = json.dumps(["context-v1", dockerfile], separators=(",", ":")).encode()
+        digest = hashlib.sha256(header + b"\0")
+        digest.update(context)
+        key = "context-v1-" + digest.hexdigest()
+        tag = f"docker-sandbox-broker/{self._broker_id}:{key}"
+        labels = {
+            MANAGED_BY_LABEL: "true",
+            BROKER_ID_LABEL: self._broker_id,
+            BUILD_KEY_LABEL: key,
+        }
+        log = get_logger().bind(build_id=build_id, image=tag)
+        with self._image_cache.building(tag):
+            try:
+                if self._image_cache.reuse_built(tag, labels):
+                    log.info("image_cache_hit")
+                    return tag
+            except DockerException as error:
+                raise RuntimeOperationError(f"could not inspect build cache: {error}") from error
+            self._build_and_record(tag, dockerfile, context)
+            log.info("image_built")
+            return tag
+
+    def _build_and_record(self, tag: str, dockerfile: str, context: bytes) -> None:
         self._image_cache.collect_if_needed()
         try:
             image = self._build_image(tag, dockerfile, context)
@@ -97,7 +123,6 @@ class DockerRuntime:
                     f"could not build sandbox image: {retry_error}"
                 ) from retry_error
         self._image_cache.record(tag, image.id, "built")
-        return tag
 
     def _build_image(self, tag: str, dockerfile: str, context: bytes):
         image, _logs = self._client.images.build(
@@ -108,6 +133,7 @@ class DockerRuntime:
             labels={
                 MANAGED_BY_LABEL: "true",
                 BROKER_ID_LABEL: self._broker_id,
+                BUILD_KEY_LABEL: tag.rsplit(":", 1)[1],
             },
             rm=True,
             forcerm=True,
@@ -139,8 +165,13 @@ class DockerRuntime:
         return RuntimeSandbox(id=container.id, state=_state(container))
 
     def inspect(self, runtime_id: str) -> RuntimeSandbox:
-        container = self._container(runtime_id)
-        container.reload()
+        try:
+            container = self._client.containers.get(runtime_id)
+            container.reload()
+        except NotFound:
+            return RuntimeSandbox(id=runtime_id, state="missing")
+        except DockerException as error:
+            raise RuntimeOperationError(f"could not inspect sandbox: {error}") from error
         return RuntimeSandbox(id=container.id, state=_state(container))
 
     def exec(self, runtime_id: str, request: ExecRequest, output_limit: int) -> ExecResult:
@@ -252,6 +283,10 @@ class DockerRuntime:
             container = self._client.containers.get(runtime_id)
         except NotFound:
             return
+        except DockerException as error:
+            raise RuntimeOperationError(
+                f"could not inspect sandbox for deletion: {error}"
+            ) from error
         labels = container.labels or {}
         expected = {
             MANAGED_BY_LABEL: "true",

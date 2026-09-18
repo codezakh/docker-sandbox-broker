@@ -66,6 +66,34 @@ with an environment that has Harbor installed:
 python -m pytest tests/consumers/test_harbor_adapter.py
 ```
 
+### Build-cache consumer check
+
+`tests/test_build_cache_docker.py` counts actual Docker build calls while testing
+concurrent reuse, runtime restart, post-install changes, and collection/rebuild.
+It runs with the normal `uv run pytest -m docker` suite.
+
+An optional check executes `terminal_agents_rl.task_images.build_context` in
+three separate Python processes inside an existing terminal-agents-rl sandbox,
+then creates task containers and checks their post-install output. It uses an
+isolated test broker, leaving the running broker alone. First run `just doctor`
+inside that sandbox; no GPU is needed for this test. Set these paths for your
+session, and use a **new** test-output directory beneath its shared workspace
+(`pytest --basetemp` clears that directory if it already exists):
+
+```bash
+export DSB_TERMINAL_CONTAINER=terminal-agents-rl-your-session
+export DSB_TERMINAL_HOST_WORKSPACE=/absolute/host/path/to/shared/workspace
+export DSB_TERMINAL_CONTAINER_WORKSPACE=/absolute/container/path/to/shared/workspace
+export DSB_TEST_SOCKET_DIR=/run/user/1234/docker-sandbox-broker
+uv run pytest -m docker tests/e2e/test_terminal_build_cache.py \
+  --basetemp="$DSB_TERMINAL_HOST_WORKSPACE/new-build-cache-test-output"
+```
+
+`DSB_TEST_SOCKET_DIR` must be a short, host-writable directory already mounted
+at the same path in the consumer container. The test creates its own uniquely
+named socket there and removes it afterward. Logs and context files remain in
+the test-output directory; test images and containers are cleaned up.
+
 ## Running
 
 Set a bearer token and serve over a user-owned Unix socket:
