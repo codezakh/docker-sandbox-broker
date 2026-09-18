@@ -30,3 +30,9 @@ class SandboxOwnershipError(BrokerError):
 class PayloadTooLargeError(BrokerError):
     code = "payload_too_large"
     status_code = 413
+
+
+class BuildCapacityError(BrokerError):
+    code = "build_capacity_exceeded"
+    status_code = 503
+    retryable = True

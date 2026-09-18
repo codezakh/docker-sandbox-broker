@@ -19,6 +19,9 @@ class BrokerSettings(BaseModel):
     max_upload_bytes: int = Field(default=128 * 1024 * 1024, ge=1024)
     max_download_bytes: int = Field(default=128 * 1024 * 1024, ge=1024)
     max_output_bytes: int = Field(default=1_000_000, ge=1024)
+    build_workers: int = Field(default=4, ge=1)
+    build_queue_size: int = Field(default=64, ge=0)
+    build_max_inflight_mb: int = Field(default=256, ge=1)
     state_dir: Path = Field(default_factory=default_state_dir)
     image_gc_min_free_mb: int = Field(default=20 * 1024, ge=0)
     image_gc_target_free_mb: int = Field(default=40 * 1024, ge=0)
@@ -54,6 +57,9 @@ class BrokerSettings(BaseModel):
             allow_docker_enabled=_env_bool("DSB_ALLOW_DOCKER_ENABLED", False),
             max_memory_mb=int(os.environ.get("DSB_MAX_MEMORY_MB", "16384")),
             max_cpus=float(os.environ.get("DSB_MAX_CPUS", "8")),
+            build_workers=int(os.environ.get("DSB_BUILD_WORKERS", "4")),
+            build_queue_size=int(os.environ.get("DSB_BUILD_QUEUE_SIZE", "64")),
+            build_max_inflight_mb=int(os.environ.get("DSB_BUILD_MAX_INFLIGHT_MB", "256")),
             state_dir=Path(os.environ.get("DSB_STATE_DIR", default_state_dir())),
             image_gc_min_free_mb=int(os.environ.get("DSB_IMAGE_GC_MIN_FREE_MB", str(20 * 1024))),
             image_gc_target_free_mb=int(

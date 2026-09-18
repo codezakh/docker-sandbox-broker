@@ -1,5 +1,12 @@
 # Consumer integrations
 
+Build admission is bounded independently of sandbox operations. A saturated
+broker returns HTTP 503 with `code=build_capacity_exceeded`, `retryable=true`,
+and `Retry-After: 1`. The Python client exposes the retryable error but does not
+automatically retry. Consumers should use bounded backoff/jitter or prewarm with
+limited concurrency; build-request timeouts include queue time. Existing API
+request and successful response shapes are unchanged. See README for limits.
+
 `POST /v1/images/build` reuses direct builds with identical archive bytes and
 Dockerfile selectors across clients and broker restarts. The response shape is
 unchanged. Use deterministic tar metadata for reliable hits; `terminal-agents-rl`

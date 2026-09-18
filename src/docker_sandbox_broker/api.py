@@ -8,8 +8,9 @@ from contextlib import asynccontextmanager, suppress
 from fastapi import Body, Depends, FastAPI, Header, Query, Response
 from fastapi.responses import JSONResponse
 
+from docker_sandbox_broker.build_executor import BuildExecutor
 from docker_sandbox_broker.config import BrokerSettings
-from docker_sandbox_broker.errors import BrokerError
+from docker_sandbox_broker.errors import BrokerError, PayloadTooLargeError
 from docker_sandbox_broker.models import (
     BuildImageResponse,
     CreateSandboxRequest,
@@ -21,6 +22,7 @@ from docker_sandbox_broker.models import (
 )
 from docker_sandbox_broker.runtime import DockerRuntime, SandboxRuntime
 from docker_sandbox_broker.service import BrokerService
+from docker_sandbox_broker.timing import RequestTiming
 
 
 def create_app(
@@ -37,6 +39,11 @@ def create_app(
     )
     service = BrokerService(active_settings, active_runtime)
     authorize = _authorizer(active_settings.auth_token)
+    builds = BuildExecutor(
+        active_settings.build_workers,
+        active_settings.build_queue_size,
+        active_settings.build_max_inflight_mb * 1024**2,
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -54,9 +61,11 @@ def create_app(
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
+            await builds.close()
 
     app = FastAPI(title="Docker Sandbox Broker", version="0.1.0", lifespan=lifespan)
     app.state.service = service
+    app.add_middleware(RequestTiming)
 
     @app.exception_handler(BrokerError)
     async def broker_error_handler(_request, error: BrokerError):
@@ -65,10 +74,13 @@ def create_app(
             message=str(error),
             retryable=error.retryable,
         )
-        return JSONResponse(status_code=error.status_code, content=body.model_dump())
+        headers = {"Retry-After": "1"} if error.retryable else None
+        return JSONResponse(
+            status_code=error.status_code, content=body.model_dump(), headers=headers
+        )
 
     @app.get("/health", response_model=HealthResponse)
-    def health() -> HealthResponse:
+    async def health() -> HealthResponse:
         return HealthResponse(broker_id=active_settings.broker_id)
 
     @app.post(
@@ -77,11 +89,14 @@ def create_app(
         status_code=201,
         dependencies=[Depends(authorize)],
     )
-    def build_image(
+    async def build_image(
         dockerfile: str = Query(default="Dockerfile"),
         context: bytes = Body(media_type="application/x-tar"),
     ) -> BuildImageResponse:
-        return BuildImageResponse(image=service.build_image(dockerfile, context))
+        if len(context) > active_settings.max_upload_bytes:
+            raise PayloadTooLargeError("build context exceeds upload limit")
+        image = await builds.run(service.build_image, dockerfile, context)
+        return BuildImageResponse(image=image)
 
     @app.post(
         "/v1/sandboxes",
@@ -163,7 +178,7 @@ def create_app(
 
 
 def _authorizer(expected_token: str) -> Callable:
-    def authorize(authorization: str | None = Header(default=None)) -> None:
+    async def authorize(authorization: str | None = Header(default=None)) -> None:
         scheme, _, supplied = (authorization or "").partition(" ")
         valid_scheme = scheme.lower() == "bearer"
         valid_token = bool(supplied) and secrets.compare_digest(supplied, expected_token)

@@ -73,6 +73,16 @@ other than absence remain errors, rather than being silently treated as missing.
 
 ## Broker-owned image cache
 
+HTTP builds use a dedicated bounded executor (four workers and 64 asynchronous
+waiters by default), independent of synchronous sandbox request workers. A
+256 MiB admission budget bounds retained context bytes. Saturation returns a
+retryable 503 with `Retry-After`; oversized individual requests return 413.
+Cancellation of a running handler does not return its worker budget until the
+blocking call finishes. Shutdown drains admitted builds. Health and token
+authentication do not consume synchronous request workers. See README for host
+configuration and timing events. These limits apply to direct HTTP builds;
+Compose/DinD work and direct Python runtime calls are outside this executor.
+
 Direct builds use a `context-v1-<sha256>` tag derived from the Dockerfile selector
 and the complete uploaded archive bytes. Identical requests reuse an existing
 image without invoking Docker's builder; changed scripts or fixtures produce a
