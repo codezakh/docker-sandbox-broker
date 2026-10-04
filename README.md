@@ -189,6 +189,8 @@ including startup errors, in `/var/tmp/docker-sandbox-broker-$UID/logs/broker.lo
 It rotates at approximately 10 MiB, retaining five backups (`broker.log.1` through
 `broker.log.5`, newest first): approximately 60 MiB total. Rotation requires no
 cron job or extra package. Ctrl-C is forwarded to the broker process group.
+Logging is best effort: if the log disk is full, output is dropped and the
+broker keeps running; writing resumes once space is available.
 Use only one writer per log path. Omit `--allow-docker` if privileged Compose
 controllers are unnecessary. Stop the previous broker at a planned safe point
 before replacing it; the command does not replace an existing broker.

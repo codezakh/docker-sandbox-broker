@@ -74,3 +74,12 @@ def describe_rotating_output():
             if process.poll() is None:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait()
+
+    def it_keeps_the_command_running_when_logs_cannot_be_written():
+        """Drops unwritable output and still returns the command's exit status."""
+        result = subprocess.run(
+            launch(Path("/dev/full"), "print('x' * 200000); print('done'); raise SystemExit(3)"),
+            capture_output=True,
+        )
+        assert result.returncode == 3
+        assert result.stderr == b""

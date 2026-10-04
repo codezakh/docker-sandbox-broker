@@ -9,9 +9,17 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 
-class StrictRotatingFileHandler(RotatingFileHandler):
+class BestEffortRotatingFileHandler(RotatingFileHandler):
+    """Drops output it cannot write; the next write reopens the file."""
+
     def handleError(self, record):
-        raise RuntimeError("log write failed")
+        self.close()
+
+    def close(self):
+        try:
+            super().close()
+        except OSError:
+            self.stream = None
 
 
 def positive_int(value: str) -> int:
@@ -36,7 +44,7 @@ def main() -> int:
 
     os.umask(0o077)
     args.log_file.parent.mkdir(parents=True, exist_ok=True)
-    handler = StrictRotatingFileHandler(
+    handler = BestEffortRotatingFileHandler(
         args.log_file, maxBytes=args.max_bytes, backupCount=args.backups, encoding="utf-8"
     )
     handler.terminator = ""
