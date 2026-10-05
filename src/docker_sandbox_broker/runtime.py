@@ -22,7 +22,12 @@ from docker_sandbox_broker.errors import (
 )
 from docker_sandbox_broker.image_cache import ImageCache
 from docker_sandbox_broker.logging import get_logger
-from docker_sandbox_broker.models import CreateSandboxRequest, ExecRequest, ExecResult
+from docker_sandbox_broker.models import (
+    EXEC_KILL_GRACE_SECONDS,
+    CreateSandboxRequest,
+    ExecRequest,
+    ExecResult,
+)
 from docker_sandbox_broker.timing import timed_operation
 
 MANAGED_BY_LABEL = "me.zaidkhan.docker-sandbox-broker.managed"
@@ -410,7 +415,8 @@ def _wrapped_command(command: str, timeout_seconds: int | None) -> str:
     if timeout_seconds is None:
         return command
     timeout = shlex.quote(str(timeout_seconds))
-    return f"timeout -s TERM -k 10 {timeout} sh -lc {shlex.quote(command)}"
+    grace = EXEC_KILL_GRACE_SECONDS
+    return f"timeout -s TERM -k {grace} {timeout} sh -lc {shlex.quote(command)}"
 
 
 def _decode_limited(content: bytes | None, limit: int) -> str:

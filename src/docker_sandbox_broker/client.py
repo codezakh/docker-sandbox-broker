@@ -56,14 +56,14 @@ class BrokerClient:
         *,
         timeout: float | None = None,
     ) -> str:
-        request_options: dict[str, Any] = {
-            "params": {"dockerfile": dockerfile},
-            "content": context,
-            "headers": {"Content-Type": "application/x-tar"},
-        }
-        if timeout is not None:
-            request_options["timeout"] = timeout
-        response = self._request("POST", "/v1/images/build", **request_options)
+        response = self._request(
+            "POST",
+            "/v1/images/build",
+            params={"dockerfile": dockerfile},
+            content=context,
+            headers={"Content-Type": "application/x-tar"},
+            **_timeout_option(timeout),
+        )
         return str(response.json()["image"])
 
     def get(self, sandbox_id: str) -> SandboxView:
@@ -145,6 +145,7 @@ class SandboxProcess:
             "POST",
             f"/v1/sandboxes/{self._sandbox_id}/exec",
             json=request.model_dump(),
+            **_timeout_option(request.wait_seconds()),
         )
         return ExecResult.model_validate(response.json())
 
@@ -154,7 +155,7 @@ class SandboxFilesystem:
         self._client = client
         self._sandbox_id = sandbox_id
 
-    def upload_file(self, content: str | bytes, path: str) -> None:
+    def upload_file(self, content: str | bytes, path: str, *, timeout: float | None = None) -> None:
         data = content.encode() if isinstance(content, str) else content
         self._client._request(
             "PUT",
@@ -162,21 +163,33 @@ class SandboxFilesystem:
             params={"path": path},
             content=data,
             headers={"Content-Type": "application/octet-stream"},
+            **_timeout_option(timeout),
         )
 
-    def download_file(self, path: str, *, binary: bool = True) -> str | bytes:
+    def download_file(
+        self, path: str, *, binary: bool = True, timeout: float | None = None
+    ) -> str | bytes:
         response = self._client._request(
             "GET",
             f"/v1/sandboxes/{self._sandbox_id}/files",
             params={"path": path},
+            **_timeout_option(timeout),
         )
         return response.content if binary else response.text
 
-    def upload_archive(self, content: bytes, root: str = "/") -> None:
+    def upload_archive(
+        self, content: bytes, root: str = "/", *, timeout: float | None = None
+    ) -> None:
         self._client._request(
             "PUT",
             f"/v1/sandboxes/{self._sandbox_id}/archives",
             params={"root": root},
             content=content,
             headers={"Content-Type": "application/x-tar"},
+            **_timeout_option(timeout),
         )
+
+
+def _timeout_option(timeout: float | None) -> dict[str, Any]:
+    """Override the client's default wait for one request when a timeout is given."""
+    return {} if timeout is None else {"timeout": timeout}

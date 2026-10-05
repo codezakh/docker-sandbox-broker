@@ -236,3 +236,28 @@ def _wait_for_inner_docker(service, sandbox_id):
     raise AssertionError(
         "expected the Docker-enabled sandbox to expose a ready inner daemon within 45 seconds"
     )
+
+
+def describe_exec_timeouts():
+    def it_waits_for_a_quiet_command_longer_than_the_default_docker_timeout(tmp_path):
+        """Lets a silent command run to its own timeout instead of Docker's default wait."""
+        settings = BrokerSettings(
+            auth_token="integration-token-long-enough", broker_id="integration"
+        )
+        runtime = DockerRuntime(
+            settings.broker_id,
+            client=docker.from_env(timeout=2),
+            state_path=tmp_path / "images.json",
+        )
+        service = BrokerService(settings, runtime)
+        sandbox = service.create(CreateSandboxRequest(image="alpine:3.20"))
+        try:
+            result = service.exec(
+                sandbox.id, ExecRequest(command="sleep 4; echo done", timeout_seconds=10)
+            )
+        finally:
+            service.delete(sandbox.id)
+            runtime._client.close()
+
+        assert result.exit_code == 0
+        assert result.stdout.strip() == "done"

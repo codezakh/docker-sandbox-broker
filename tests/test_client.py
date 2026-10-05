@@ -81,6 +81,35 @@ def describe_provider_shaped_client():
             "DELETE",
         ]
 
+    def it_waits_for_an_exec_as_long_as_its_command_timeout():
+        """Waits past a timed exec's kill deadline and keeps the default for untimed execs."""
+        provider = ProviderTransport()
+
+        with BrokerClient("test-token", transport=httpx.MockTransport(provider)) as client:
+            sandbox = client.create(CreateSandboxRequest(image="alpine:3.20"))
+            sandbox.process.exec("make test", timeout=600)
+            sandbox.process.exec("echo hello")
+
+        timed, untimed = (
+            request.extensions["timeout"]["read"] for request in provider.requests[1:]
+        )
+        assert timed > 600
+        assert untimed == 300
+
+    def it_applies_a_per_call_timeout_to_file_transfers():
+        """Uses a caller's timeout for uploads and downloads, and the default otherwise."""
+        provider = ProviderTransport()
+
+        with BrokerClient("test-token", transport=httpx.MockTransport(provider)) as client:
+            sandbox = client.create(CreateSandboxRequest(image="alpine:3.20"))
+            sandbox.fs.upload_file("hello", "/workspace/a.txt", timeout=900)
+            sandbox.fs.download_file("/workspace/a.txt", timeout=901)
+            sandbox.fs.upload_archive(b"", timeout=902)
+            sandbox.fs.upload_file("hello", "/workspace/b.txt")
+
+        reads = [request.extensions["timeout"]["read"] for request in provider.requests[1:]]
+        assert reads == [900, 901, 902, 300]
+
     def it_exposes_typed_provider_errors():
         """Exposes stable provider error codes to consumer adapters."""
 

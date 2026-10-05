@@ -57,12 +57,25 @@ class SandboxView(BaseModel):
     or None when expiry is disabled."""
 
 
+EXEC_KILL_GRACE_SECONDS = 10
+"""How long a timed-out command has after SIGTERM before it is killed."""
+
+EXEC_RESPONSE_MARGIN_SECONDS = 30
+"""Extra wait beyond the kill deadline for the broker to collect and return results."""
+
+
 class ExecRequest(BaseModel):
     command: str = Field(min_length=1)
     timeout_seconds: int | None = Field(default=None, ge=1, le=3600)
     cwd: str | None = None
     environment: dict[str, str] = Field(default_factory=dict)
     user: str | None = None
+
+    def wait_seconds(self) -> float | None:
+        """How long a caller should wait for this exec, or None when it is unbounded."""
+        if self.timeout_seconds is None:
+            return None
+        return self.timeout_seconds + EXEC_KILL_GRACE_SECONDS + EXEC_RESPONSE_MARGIN_SECONDS
 
 
 class ExecResult(BaseModel):
